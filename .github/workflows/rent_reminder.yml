@@ -3,7 +3,9 @@ name: Rent Reminder Daily
 on:
   schedule:
     # UTC 5:00 = 北京时间 13:00
+    # UTC 10:00 = 北京时间 18:00
     - cron: '0 5 * * *'
+    - cron: '0 10 * * *'
   workflow_dispatch:
     # 允许手动触发，方便测试
 
