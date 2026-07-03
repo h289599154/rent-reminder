@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-房租到期提醒脚本 V3 - GitHub Actions 版
-每天自动检查，推送逾期和今日交租的房间信息到微信
+房租到期提醒脚本 V4 - GitHub Actions 版
+支持：分开推送 + Token 续期提醒
+
+- 悦居公寓推送给朋友
+- 彩虹公寓推送给房东
+- Token 到期前7天开始每日提醒续期
 
 所有敏感配置通过环境变量读取，适配 GitHub Actions Secrets
-
-数据解析说明：
-- 日期类型(TIME)：cellValue.time  → {year, month, day}
-- 数字类型(NUMBER)：cellValue.number
-- 文本类型(TEXT)：cellValue.text
-- 下拉选择(SELECT)：cellValue.select.value[0] → 对照options找到text
 """
 
 import os
@@ -35,6 +33,14 @@ ACCESS_TOKEN = os.environ.get('TENCENT_ACCESS_TOKEN', '')
 OPEN_ID = os.environ.get('TENCENT_OPEN_ID', '')
 CLIENT_SECRET = os.environ.get('TENCENT_CLIENT_SECRET', '')
 
+# ========== PushPlus配置（从环境变量读取） ==========
+PUSHPLUS_TOKEN = os.environ.get('PUSHPLUS_TOKEN', '')
+FRIEND_PUSHPLUS_TOKEN = os.environ.get('FRIEND_PUSHPLUS_TOKEN', '')
+PUSHPLUS_API = 'http://www.pushplus.plus/send'
+
+# Token 提前提醒天数
+TOKEN_EXPIRE_WARN_DAYS = 7
+
 # ========== 文档配置 ==========
 DOCUMENTS = {
     'yueju': {
@@ -43,6 +49,7 @@ DOCUMENTS = {
         'name': '悦居',
         'range': 'A1:H80',
         'skip_rows': [11, 22, 33, 44, 55, 66],
+        'push_to': 'friend',  # 推送给朋友
         'colors': {
             'bg': '#FFF7F0', 'border': '#E8853D', 'title': '#C5601A', 'dash': '#F5D5C0'
         }
@@ -53,21 +60,18 @@ DOCUMENTS = {
         'name': '彩虹',
         'range': 'A1:H50',
         'skip_rows': [15, 25, 35],
+        'push_to': 'owner',   # 推送给房东
         'colors': {
             'bg': '#F0F5FF', 'border': '#3D8BE8', 'title': '#1A5FC5', 'dash': '#C5D5F5'
         }
     }
 }
 
-# ========== PushPlus配置（从环境变量读取） ==========
-PUSHPLUS_TOKEN = os.environ.get('PUSHPLUS_TOKEN', '')
-PUSHPLUS_API = 'http://www.pushplus.plus/send'
-
 
 # ========== Token管理 ==========
 
-def check_token_expiry():
-    """检查token是否即将过期（通过JWT解析）"""
+def parse_token_expiry():
+    """解析token过期时间（通过JWT解析）"""
     try:
         import base64
         payload = ACCESS_TOKEN.split('.')[1]
@@ -75,25 +79,23 @@ def check_token_expiry():
         decoded = json.loads(base64.urlsafe_b64decode(payload))
         exp_time = datetime.fromtimestamp(decoded['exp'])
         days_left = (exp_time - datetime.now()).days
-        if days_left <= 5:
-            logger.warning(f"⚠️ Token将在{days_left}天后过期，请尽快续期！")
-            # 尝试自动续期
-            if CLIENT_SECRET:
-                try_refresh_token(days_left)
-        else:
-            logger.info(f"Token剩余有效期: {days_left}天")
-        return days_left
+        return exp_time, days_left
     except Exception as e:
         logger.warning(f"解析Token过期时间失败: {e}")
-        return 30
+        return None, 30
 
 
-def try_refresh_token(days_left):
-    """尝试使用client_secret刷新token（需要refresh_token）"""
-    # GitHub Actions 环境无法持久化token，这里仅做检测和提醒
-    # 实际续期需要用户手动获取refresh_token后配置
-    logger.info(f"Token剩余{days_left}天，尝试续期...")
-    logger.warning("⚠️ GitHub Actions环境无法自动续期Token，请手动更新Secrets中的TENCENT_ACCESS_TOKEN")
+def check_token_expiry():
+    """检查token是否即将过期，并返回过期时间信息"""
+    exp_time, days_left = parse_token_expiry()
+    
+    if exp_time:
+        if days_left <= TOKEN_EXPIRE_WARN_DAYS:
+            logger.warning(f"⚠️ Token将在{days_left}天后过期，请尽快续期！")
+        else:
+            logger.info(f"Token剩余有效期: {days_left}天")
+    
+    return exp_time, days_left
 
 
 # ========== 数据读取与解析 ==========
@@ -123,10 +125,7 @@ def get_sheet_data(book_id, sheet_id, range_str):
 
 
 def extract_cell_text(cell_data):
-    """
-    从API返回的单元格数据中提取文本值
-    支持多种数据类型：TIME(日期), NUMBER(数字), TEXT(文本), SELECT(下拉选择)
-    """
+    """从API返回的单元格数据中提取文本值"""
     if not cell_data:
         return ''
     
@@ -238,8 +237,6 @@ def check_rent_status(room):
     
     逾期判断：退租日日数 < 今天日数（不看月份，只看日）
     今日交租：退租日日数 == 今天日数
-    
-    返回: None / {'status': 'overdue', 'days': N} / {'status': 'today', 'days': 0}
     """
     today = datetime.now()
     today_day = today.day
@@ -387,6 +384,7 @@ def generate_room_html(room, is_overdue):
 
 
 def generate_building_html(doc_config, data):
+    """生成单栋公寓的HTML卡片"""
     name = doc_config['name']
     colors = doc_config['colors']
     
@@ -413,58 +411,52 @@ def generate_building_html(doc_config, data):
 </div>'''
 
 
-def generate_html(yueju_data, caihong_data):
+def generate_html(doc_config, data):
+    """生成单个公寓的HTML"""
     today_str = datetime.now().strftime('%Y-%m-%d')
+    count = len(data['overdue']) + len(data['today'])
     
-    yueju_html = generate_building_html(DOCUMENTS['yueju'], yueju_data)
-    caihong_html = generate_building_html(DOCUMENTS['caihong'], caihong_data)
+    building_html = generate_building_html(doc_config, data)
     
-    yueju_count = len(yueju_data['overdue']) + len(yueju_data['today'])
-    caihong_count = len(caihong_data['overdue']) + len(caihong_data['today'])
-    total = yueju_count + caihong_count
+    return f'''<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {doc_config['name']} · {today_str}</h2>
+{building_html}
+<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">{doc_config['name']} 共 {count}间待处理</div>'''
+
+
+def generate_title(doc_name, data, is_all_clear=False):
+    """生成动态标题"""
+    if is_all_clear:
+        return f'🏠 收租提醒 | {doc_name}一切正常'
     
-    return f'''<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {today_str}</h2>
-{yueju_html}
-<br>
-{caihong_html}
-<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">悦居 {yueju_count}间 · 彩虹 {caihong_count}间 · 共 {total}间</div>'''
+    overdue = len(data['overdue'])
+    today = len(data['today'])
+    total = overdue + today
+    parts = []
+    if overdue > 0:
+        parts.append(f'逾期{overdue}间')
+    if today > 0:
+        parts.append(f'今日交租{today}间')
+    
+    if parts:
+        return f'🏠 收租提醒 | {doc_name} {"·".join(parts)} | {total}间待处理'
+    else:
+        return f'🏠 收租提醒 | {doc_name}一切正常'
 
 
 # ========== 推送 ==========
 
-def send_pushplus(html_content, yueju_data, caihong_data, is_all_clear=False):
-    """发送PushPlus推送"""
-    yueju_overdue = len(yueju_data['overdue']) if yueju_data else 0
-    yueju_today = len(yueju_data['today']) if yueju_data else 0
-    caihong_overdue = len(caihong_data['overdue']) if caihong_data else 0
-    caihong_today = len(caihong_data['today']) if caihong_data else 0
+def send_pushplus(token, title, content, is_all_clear=False):
+    """发送PushPlus推送（通用）"""
+    if not token:
+        logger.warning("⚠️ 未配置PushPlus token，跳过推送")
+        return False
     
-    total = yueju_overdue + yueju_today + caihong_overdue + caihong_today
-    
-    if total > 0:
-        parts = []
-        if yueju_overdue + caihong_overdue > 0:
-            parts.append(f'逾期{yueju_overdue + caihong_overdue}间')
-        if yueju_today + caihong_today > 0:
-            parts.append(f'今日交租{yueju_today + caihong_today}间')
-        title = f'🏠 收租提醒 | {"·".join(parts)} | {total}间待处理'
-    else:
-        title = '🏠 收租提醒 | 一切正常'
-    
-    if is_all_clear:
-        data = {
-            'token': PUSHPLUS_TOKEN,
-            'title': title,
-            'content': '今天没有需要交租的房间，一切正常。',
-            'template': 'html'
-        }
-    else:
-        data = {
-            'token': PUSHPLUS_TOKEN,
-            'title': title,
-            'content': html_content,
-            'template': 'html'
-        }
+    data = {
+        'token': token,
+        'title': title,
+        'content': content,
+        'template': 'html'
+    }
     
     try:
         resp = requests.post(
@@ -475,7 +467,7 @@ def send_pushplus(html_content, yueju_data, caihong_data, is_all_clear=False):
         )
         result = resp.json()
         if result.get('code') == 200:
-            logger.info("✓ PushPlus推送成功")
+            logger.info(f"✓ PushPlus推送成功: {title[:30]}...")
             return True
         else:
             logger.error(f"✗ PushPlus推送失败: {result}")
@@ -485,9 +477,44 @@ def send_pushplus(html_content, yueju_data, caihong_data, is_all_clear=False):
         return False
 
 
-def send_all(html_content, yueju_data, caihong_data, is_all_clear=False):
-    """推送"""
-    return send_pushplus(html_content, yueju_data, caihong_data, is_all_clear)
+def send_building_push(doc_config, data, is_all_clear=False):
+    """根据配置推送给指定接收人"""
+    target = doc_config.get('push_to', 'owner')
+    token = FRIEND_PUSHPLUS_TOKEN if target == 'friend' else PUSHPLUS_TOKEN
+    receiver = '朋友' if target == 'friend' else '房东'
+    
+    title = generate_title(doc_config['name'], data, is_all_clear)
+    
+    if is_all_clear:
+        content = f'<div style="color:#555">今天没有需要交租的房间，一切正常。</div>'
+    else:
+        content = generate_html(doc_config, data)
+    
+    logger.info(f"--- 推送 {doc_config['name']} 给{receiver} ---")
+    return send_pushplus(token, title, content, is_all_clear)
+
+
+def send_token_expire_reminder(days_left, expire_time):
+    """发送Token续期提醒给房东"""
+    if not PUSHPLUS_TOKEN:
+        return False
+    
+    title = f'⚠️ 腾讯文档Token将在{days_left}天后过期'
+    content = f'''<div style="color:#D4380D;font-size:15px;font-weight:bold;margin-bottom:10px">请及时续期腾讯文档Token</div>
+<div style="color:#333;line-height:1.6">
+<p>Token 到期时间：{expire_time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+<p>剩余天数：{days_left}天</p>
+<p style="margin-top:10px"><b>续期步骤：</b></p>
+<ol style="color:#555;padding-left:20px">
+<li>打开腾讯文档开放平台：https://docs.qq.com/open/developers/</li>
+<li>找到开发者信息中的 access_token</li>
+<li>点击"重置"按钮生成新 token</li>
+<li>复制新 token，更新 GitHub Secrets 中的 TENCENT_ACCESS_TOKEN</li>
+</ol>
+</div>'''
+    
+    logger.warning(f"⚠️ Token即将过期，发送提醒通知")
+    return send_pushplus(PUSHPLUS_TOKEN, title, content)
 
 
 # ========== 主函数 ==========
@@ -495,7 +522,7 @@ def send_all(html_content, yueju_data, caihong_data, is_all_clear=False):
 def main():
     """主函数"""
     logger.info("=" * 50)
-    logger.info("房租提醒脚本开始执行 (V3-GitHub Actions版)")
+    logger.info("房租提醒脚本开始执行 (V4-GitHub Actions版)")
     logger.info("=" * 50)
     
     # 检查环境变量
@@ -505,10 +532,16 @@ def main():
     if not PUSHPLUS_TOKEN:
         logger.error("✗ 缺少环境变量 PUSHPLUS_TOKEN")
         sys.exit(1)
+    if not FRIEND_PUSHPLUS_TOKEN:
+        logger.warning("⚠️ 未配置 FRIEND_PUSHPLUS_TOKEN，悦居将不推送")
     
     try:
         # 检查Token有效期
-        days_left = check_token_expiry()
+        exp_time, days_left = check_token_expiry()
+        
+        # 如果Token即将过期，发送提醒（给房东）
+        if days_left <= TOKEN_EXPIRE_WARN_DAYS:
+            send_token_expire_reminder(days_left, exp_time)
         
         # 步骤1：通过API读取两份文档
         all_data = {}
@@ -518,7 +551,7 @@ def main():
             rooms = parse_rows_to_rooms(rows)
             logger.info(f"✓ 解析到 {len(rooms)} 个房间记录")
             
-            # 调试：打印前5个有效房间
+            # 调试：打印前10个有效房间
             for i, room in enumerate(rooms[:10]):
                 if room['room'] and not should_skip(room, i+1, doc['skip_rows']):
                     logger.info(f"  示例: {room['room']} | 退租日={room['rent_end']} | 付标记={room['paid_mark']} | 起租={room['rent_start']}")
@@ -533,23 +566,17 @@ def main():
             
             all_data[key] = filtered
         
-        # 步骤2：生成HTML并推送
-        yueju = all_data['yueju']
-        caihong = all_data['caihong']
-        
-        total_alerts = (len(yueju['overdue']) + len(yueju['today']) + 
-                       len(caihong['overdue']) + len(caihong['today']))
-        
-        if total_alerts == 0:
-            logger.info("今天没有需要交租的房间，一切正常。")
-            send_all(None, yueju, caihong, is_all_clear=True)
-        else:
-            html = generate_html(yueju, caihong)
-            send_all(html, yueju, caihong)
-        
-        # Token过期提醒（写入推送内容中提示用户更新）
-        if days_left <= 5:
-            logger.warning(f"⚠️ Token将在{days_left}天后过期！请尽快更新GitHub Secrets中的TENCENT_ACCESS_TOKEN")
+        # 步骤2：分别推送
+        for key, doc in DOCUMENTS.items():
+            data = all_data[key]
+            total_alerts = len(data['overdue']) + len(data['today'])
+            
+            if total_alerts == 0:
+                # 只有悦居房东有提到"不发一切正常的通知"，这里默认保持发送但可配置
+                logger.info(f"{doc['name']}今天没有需要交租的房间，一切正常。")
+                send_building_push(doc, data, is_all_clear=True)
+            else:
+                send_building_push(doc, data)
         
         logger.info("=" * 50)
         logger.info("房租提醒脚本执行完成")
@@ -557,12 +584,12 @@ def main():
         
     except Exception as e:
         logger.error(f"✗ 执行失败: {e}", exc_info=True)
-        # 推送失败通知
+        # 推送失败通知给房东
         try:
             send_pushplus(
-                f'<div style="color:#D4380D;font-weight:bold">⚠️ 收租提醒脚本执行失败</div><div style="color:#999">{str(e)}</div>',
-                {'overdue': [], 'today': []}, {'overdue': [], 'today': []},
-                is_all_clear=False
+                PUSHPLUS_TOKEN,
+                '⚠️ 收租提醒脚本执行失败',
+                f'<div style="color:#D4380D;font-weight:bold">⚠️ 收租提醒脚本执行失败</div><div style="color:#999">{str(e)}</div>'
             )
         except:
             pass
