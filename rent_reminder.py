@@ -49,7 +49,6 @@ DOCUMENTS = {
         'name': '悦居',
         'range': 'A1:H80',
         'skip_rows': [11, 22, 33, 44, 55, 66],
-        'push_to': ['owner', 'friend'],  # 房东+朋友都收到
         'colors': {
             'bg': '#FFF7F0', 'border': '#E8853D', 'title': '#C5601A', 'dash': '#F5D5C0'
         }
@@ -60,7 +59,6 @@ DOCUMENTS = {
         'name': '彩虹',
         'range': 'A1:H50',
         'skip_rows': [15, 25, 35],
-        'push_to': ['owner'],   # 只有房东收到
         'colors': {
             'bg': '#F0F5FF', 'border': '#3D8BE8', 'title': '#1A5FC5', 'dash': '#C5D5F5'
         }
@@ -411,8 +409,48 @@ def generate_building_html(doc_config, data):
 </div>'''
 
 
-def generate_html(doc_config, data):
-    """生成单个公寓的HTML"""
+def generate_combined_html(yueju_data, caihong_data):
+    """生成合并HTML（悦居+彩虹在一条推送里）"""
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    
+    yueju_html = generate_building_html(DOCUMENTS['yueju'], yueju_data)
+    caihong_html = generate_building_html(DOCUMENTS['caihong'], caihong_data)
+    
+    yueju_count = len(yueju_data['overdue']) + len(yueju_data['today'])
+    caihong_count = len(caihong_data['overdue']) + len(caihong_data['today'])
+    total = yueju_count + caihong_count
+    
+    return f'''<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {today_str}</h2>
+{yueju_html}
+<br>
+{caihong_html}
+<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">悦居 {yueju_count}间 · 彩虹 {caihong_count}间 · 共 {total}间</div>'''
+
+
+def generate_combined_title(yueju_data, caihong_data):
+    """生成合并推送的动态标题"""
+    yueju_overdue = len(yueju_data['overdue'])
+    yueju_today = len(yueju_data['today'])
+    caihong_overdue = len(caihong_data['overdue'])
+    caihong_today = len(caihong_data['today'])
+    
+    total_overdue = yueju_overdue + caihong_overdue
+    total_today = yueju_today + caihong_today
+    total = total_overdue + total_today
+    
+    if total == 0:
+        return '🏠 收租提醒 | 一切正常'
+    
+    parts = []
+    if total_overdue > 0:
+        parts.append(f'逾期{total_overdue}间')
+    if total_today > 0:
+        parts.append(f'今日交租{total_today}间')
+    return f'🏠 收租提醒 | {"·".join(parts)} | {total}间待处理'
+
+
+def generate_single_html(doc_config, data):
+    """生成单个公寓的HTML（给朋友用）"""
     today_str = datetime.now().strftime('%Y-%m-%d')
     count = len(data['overdue']) + len(data['today'])
     
@@ -423,29 +461,26 @@ def generate_html(doc_config, data):
 <div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">{doc_config['name']} 共 {count}间待处理</div>'''
 
 
-def generate_title(doc_name, data, is_all_clear=False):
-    """生成动态标题"""
-    if is_all_clear:
-        return f'🏠 收租提醒 | {doc_name}一切正常'
-    
+def generate_single_title(doc_name, data):
+    """生成单个公寓的动态标题"""
     overdue = len(data['overdue'])
     today = len(data['today'])
     total = overdue + today
+    
+    if total == 0:
+        return f'🏠 收租提醒 | {doc_name}一切正常'
+    
     parts = []
     if overdue > 0:
         parts.append(f'逾期{overdue}间')
     if today > 0:
         parts.append(f'今日交租{today}间')
-    
-    if parts:
-        return f'🏠 收租提醒 | {doc_name} {"·".join(parts)} | {total}间待处理'
-    else:
-        return f'🏠 收租提醒 | {doc_name}一切正常'
+    return f'🏠 收租提醒 | {doc_name} {"·".join(parts)} | {total}间待处理'
 
 
 # ========== 推送 ==========
 
-def send_pushplus(token, title, content, is_all_clear=False):
+def send_pushplus(token, title, content):
     """发送PushPlus推送（通用）"""
     if not token:
         logger.warning("⚠️ 未配置PushPlus token，跳过推送")
@@ -467,7 +502,7 @@ def send_pushplus(token, title, content, is_all_clear=False):
         )
         result = resp.json()
         if result.get('code') == 200:
-            logger.info(f"✓ PushPlus推送成功: {title[:30]}...")
+            logger.info(f"✓ PushPlus推送成功: {title[:40]}...")
             return True
         else:
             logger.error(f"✗ PushPlus推送失败: {result}")
@@ -475,35 +510,6 @@ def send_pushplus(token, title, content, is_all_clear=False):
     except Exception as e:
         logger.error(f"✗ PushPlus推送异常: {e}")
         return False
-
-
-def send_building_push(doc_config, data, is_all_clear=False):
-    """根据配置推送给指定接收人（支持多人）"""
-    targets = doc_config.get('push_to', ['owner'])
-    if isinstance(targets, str):
-        targets = [targets]
-    
-    title = generate_title(doc_config['name'], data, is_all_clear)
-    
-    if is_all_clear:
-        content = f'<div style="color:#555">今天没有需要交租的房间，一切正常。</div>'
-    else:
-        content = generate_html(doc_config, data)
-    
-    results = []
-    for target in targets:
-        token = FRIEND_PUSHPLUS_TOKEN if target == 'friend' else PUSHPLUS_TOKEN
-        receiver = '朋友' if target == 'friend' else '房东'
-        
-        if target == 'friend' and not FRIEND_PUSHPLUS_TOKEN:
-            logger.warning(f"⚠️ 未配置朋友token，跳过推送给朋友")
-            continue
-        
-        logger.info(f"--- 推送 {doc_config['name']} 给{receiver} ---")
-        result = send_pushplus(token, title, content, is_all_clear)
-        results.append(result)
-    
-    return all(results) if results else False
 
 
 def send_token_expire_reminder(days_left, expire_time):
@@ -578,17 +584,37 @@ def main():
             
             all_data[key] = filtered
         
-        # 步骤2：分别推送
-        for key, doc in DOCUMENTS.items():
-            data = all_data[key]
-            total_alerts = len(data['overdue']) + len(data['today'])
-            
-            if total_alerts == 0:
-                # 只有悦居房东有提到"不发一切正常的通知"，这里默认保持发送但可配置
-                logger.info(f"{doc['name']}今天没有需要交租的房间，一切正常。")
-                send_building_push(doc, data, is_all_clear=True)
+        # 步骤2：推送
+        yueju = all_data['yueju']
+        caihong = all_data['caihong']
+        
+        total_alerts = (len(yueju['overdue']) + len(yueju['today']) + 
+                       len(caihong['overdue']) + len(caihong['today']))
+        
+        # --- 推送给房东：合并一条推送（悦居+彩虹） ---
+        logger.info("--- 推送合并消息给房东 ---")
+        if total_alerts == 0:
+            logger.info("今天没有需要交租的房间，一切正常。")
+            send_pushplus(PUSHPLUS_TOKEN, 
+                         '🏠 收租提醒 | 一切正常',
+                         '<div style="color:#555">今天没有需要交租的房间，一切正常。</div>')
+        else:
+            combined_html = generate_combined_html(yueju, caihong)
+            combined_title = generate_combined_title(yueju, caihong)
+            send_pushplus(PUSHPLUS_TOKEN, combined_title, combined_html)
+        
+        # --- 推送给朋友：只推悦居 ---
+        if FRIEND_PUSHPLUS_TOKEN:
+            logger.info("--- 推送悦居消息给朋友 ---")
+            yueju_alerts = len(yueju['overdue']) + len(yueju['today'])
+            if yueju_alerts == 0:
+                logger.info("悦居今天没有需要交租的房间，不推送给朋友。")
             else:
-                send_building_push(doc, data)
+                friend_html = generate_single_html(DOCUMENTS['yueju'], yueju)
+                friend_title = generate_single_title('悦居', yueju)
+                send_pushplus(FRIEND_PUSHPLUS_TOKEN, friend_title, friend_html)
+        else:
+            logger.warning("⚠️ 未配置朋友token，跳过推送给朋友")
         
         logger.info("=" * 50)
         logger.info("房租提醒脚本执行完成")
