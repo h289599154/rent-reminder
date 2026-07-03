@@ -1,0 +1,32 @@
+name: Rent Reminder Daily
+
+on:
+  schedule:
+    # UTC 5:00 = 北京时间 13:00
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    # 允许手动触发，方便测试
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run rent reminder
+        env:
+          TENCENT_CLIENT_ID: ${{ secrets.TENCENT_CLIENT_ID }}
+          TENCENT_ACCESS_TOKEN: ${{ secrets.TENCENT_ACCESS_TOKEN }}
+          TENCENT_OPEN_ID: ${{ secrets.TENCENT_OPEN_ID }}
+          TENCENT_CLIENT_SECRET: ${{ secrets.TENCENT_CLIENT_SECRET }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python rent_reminder.py
