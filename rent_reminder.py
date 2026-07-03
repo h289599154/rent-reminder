@@ -49,7 +49,7 @@ DOCUMENTS = {
         'name': '悦居',
         'range': 'A1:H80',
         'skip_rows': [11, 22, 33, 44, 55, 66],
-        'push_to': 'friend',  # 推送给朋友
+        'push_to': ['owner', 'friend'],  # 房东+朋友都收到
         'colors': {
             'bg': '#FFF7F0', 'border': '#E8853D', 'title': '#C5601A', 'dash': '#F5D5C0'
         }
@@ -60,7 +60,7 @@ DOCUMENTS = {
         'name': '彩虹',
         'range': 'A1:H50',
         'skip_rows': [15, 25, 35],
-        'push_to': 'owner',   # 推送给房东
+        'push_to': ['owner'],   # 只有房东收到
         'colors': {
             'bg': '#F0F5FF', 'border': '#3D8BE8', 'title': '#1A5FC5', 'dash': '#C5D5F5'
         }
@@ -478,10 +478,10 @@ def send_pushplus(token, title, content, is_all_clear=False):
 
 
 def send_building_push(doc_config, data, is_all_clear=False):
-    """根据配置推送给指定接收人"""
-    target = doc_config.get('push_to', 'owner')
-    token = FRIEND_PUSHPLUS_TOKEN if target == 'friend' else PUSHPLUS_TOKEN
-    receiver = '朋友' if target == 'friend' else '房东'
+    """根据配置推送给指定接收人（支持多人）"""
+    targets = doc_config.get('push_to', ['owner'])
+    if isinstance(targets, str):
+        targets = [targets]
     
     title = generate_title(doc_config['name'], data, is_all_clear)
     
@@ -490,8 +490,20 @@ def send_building_push(doc_config, data, is_all_clear=False):
     else:
         content = generate_html(doc_config, data)
     
-    logger.info(f"--- 推送 {doc_config['name']} 给{receiver} ---")
-    return send_pushplus(token, title, content, is_all_clear)
+    results = []
+    for target in targets:
+        token = FRIEND_PUSHPLUS_TOKEN if target == 'friend' else PUSHPLUS_TOKEN
+        receiver = '朋友' if target == 'friend' else '房东'
+        
+        if target == 'friend' and not FRIEND_PUSHPLUS_TOKEN:
+            logger.warning(f"⚠️ 未配置朋友token，跳过推送给朋友")
+            continue
+        
+        logger.info(f"--- 推送 {doc_config['name']} 给{receiver} ---")
+        result = send_pushplus(token, title, content, is_all_clear)
+        results.append(result)
+    
+    return all(results) if results else False
 
 
 def send_token_expire_reminder(days_left, expire_time):
