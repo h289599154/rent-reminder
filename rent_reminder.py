@@ -33,10 +33,9 @@ ACCESS_TOKEN = os.environ.get('TENCENT_ACCESS_TOKEN', '')
 OPEN_ID = os.environ.get('TENCENT_OPEN_ID', '')
 CLIENT_SECRET = os.environ.get('TENCENT_CLIENT_SECRET', '')
 
-# ========== PushPlus配置（从环境变量读取） ==========
-PUSHPLUS_TOKEN = os.environ.get('PUSHPLUS_TOKEN', '')
-FRIEND_PUSHPLUS_TOKEN = os.environ.get('FRIEND_PUSHPLUS_TOKEN', '')
-PUSHPLUS_API = 'http://www.pushplus.plus/send'
+# ========== 企业微信群机器人配置（从环境变量读取） ==========
+WECOM_BOT_KEY = os.environ.get('WECOM_BOT_KEY', '')
+WECOM_BOT_URL = f'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_BOT_KEY}'
 
 # Token 提前提醒天数
 TOKEN_EXPIRE_WARN_DAYS = 7
@@ -535,6 +534,48 @@ def send_token_expire_reminder(days_left, expire_time):
     return send_pushplus(PUSHPLUS_TOKEN, title, content)
 
 
+# ========== 去重逻辑 ==========
+
+# GitHub Actions 每次运行是全新环境，无法用本地文件去重
+# 策略：通过 GitHub API 检查今天同一时段是否已有成功的 run
+# 如果有，则跳过推送
+
+def check_already_pushed_today():
+    """
+    通过 GitHub API 检查今天是否已有成功的 workflow run
+    返回 True 表示今天已推送过，应该跳过
+    """
+    gh_token = os.environ.get('GH_TOKEN', '')
+    if not gh_token:
+        # 没有 token，不检查，直接推送
+        return False
+    
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        # 查询今天的成功 runs
+        url = 'https://api.github.com/repos/h289599154/rent-reminder/actions/runs'
+        params = {
+            'status': 'completed',
+            'per_page': 10,
+        }
+        resp = requests.get(url, params=params, headers={
+            'Authorization': f'token {gh_token}',
+            'Accept': 'application/vnd.github+json',
+        }, timeout=10)
+        
+        runs = resp.json().get('workflow_runs', [])
+        for r in runs:
+            # 检查是否是今天的、schedule 触发的、且成功的
+            created = r.get('created_at', '')[:10]  # YYYY-MM-DD
+            if created == today and r.get('conclusion') == 'success' and r.get('event') == 'schedule':
+                logger.info(f"⏭️ 今天已有定时推送记录（{r['created_at']}），跳过本次")
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"检查去重失败: {e}，继续推送")
+        return False
+
+
 # ========== 主函数 ==========
 
 def main():
@@ -552,6 +593,11 @@ def main():
         sys.exit(1)
     if not FRIEND_PUSHPLUS_TOKEN:
         logger.warning("⚠️ 未配置 FRIEND_PUSHPLUS_TOKEN，悦居将不推送")
+    
+    # 去重检查：如果今天已有定时推送成功，则跳过
+    if check_already_pushed_today():
+        logger.info("⏭️ 今天已成功推送过，跳过本次执行")
+        return
     
     try:
         # 检查Token有效期

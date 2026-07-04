@@ -2,10 +2,14 @@ name: Rent Reminder Daily
 
 on:
   schedule:
-    # UTC 5:00 = 北京时间 13:00
-    # UTC 10:00 = 北京时间 18:00
-    - cron: '0 5 * * *'
-    - cron: '0 10 * * *'
+    # 第一次推送：北京时间 14:00（多触发点防漏）
+    - cron: '0 6 * * *'    # 14:00
+    - cron: '5 6 * * *'    # 14:05（补发）
+    - cron: '10 6 * * *'   # 14:10（补发）
+    # 第二次推送：北京时间 19:00（多触发点防漏）
+    - cron: '0 11 * * *'   # 19:00
+    - cron: '5 11 * * *'   # 19:05（补发）
+    - cron: '10 11 * * *'  # 19:10（补发）
   workflow_dispatch:
     # 允许手动触发，方便测试
 
@@ -32,4 +36,5 @@ jobs:
           TENCENT_CLIENT_SECRET: ${{ secrets.TENCENT_CLIENT_SECRET }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           FRIEND_PUSHPLUS_TOKEN: ${{ secrets.FRIEND_PUSHPLUS_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python rent_reminder.py
