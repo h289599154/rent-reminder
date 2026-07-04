@@ -19,6 +19,14 @@ from datetime import datetime, timedelta
 import requests
 import re
 
+# ========== 时区处理 ==========
+# GitHub Actions 默认 UTC，需要转换为北京时间（UTC+8）
+BEIJING_TZ_OFFSET = timedelta(hours=8)
+
+def beijing_now():
+    """获取北京时间"""
+    return datetime.utcnow() + BEIJING_TZ_OFFSET
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -81,7 +89,7 @@ def should_push_now():
     2. 今天当前时段还没有推送过
     返回 True 表示可以推送，False 表示跳过
     """
-    now = datetime.now()
+    now = beijing_now()
     current_hour = now.hour
     today_str = now.strftime('%Y-%m-%d')
 
@@ -115,7 +123,7 @@ def should_push_now():
 
 def mark_pushed():
     """标记当前时段已推送"""
-    now = datetime.now()
+    now = beijing_now()
     today_str = now.strftime('%Y-%m-%d')
     current_hour = now.hour
     current_slot = 'afternoon' if 13 <= current_hour <= 15 else 'evening'
@@ -146,7 +154,7 @@ def parse_token_expiry():
         payload += '=' * (4 - len(payload) % 4)
         decoded = json.loads(base64.urlsafe_b64decode(payload))
         exp_time = datetime.fromtimestamp(decoded['exp'])
-        days_left = (exp_time - datetime.now()).days
+        days_left = (exp_time - beijing_now()).days
         return exp_time, days_left
     except Exception as e:
         logger.warning(f"解析Token过期时间失败: {e}")
@@ -306,7 +314,7 @@ def check_rent_status(room):
     逾期判断：退租日日数 < 今天日数（不看月份，只看日）
     今日交租：退租日日数 == 今天日数
     """
-    today = datetime.now()
+    today = beijing_now()
     today_day = today.day
 
     rent_end = room.get('rent_end', '')
@@ -366,7 +374,7 @@ def check_lease_expiry(rent_end_str):
 
     try:
         rent_end = datetime.strptime(rent_end_str.strip(), '%Y-%m-%d')
-        today = datetime.now()
+        today = beijing_now()
         days_diff = (rent_end - today).days
 
         if days_diff < 0:
@@ -481,7 +489,7 @@ def generate_building_html(doc_config, data):
 
 def generate_combined_html(yueju_data, caihong_data):
     """生成合并HTML（悦居+彩虹在一条推送里）"""
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = beijing_now().strftime('%Y-%m-%d')
 
     yueju_html = generate_building_html(DOCUMENTS['yueju'], yueju_data)
     caihong_html = generate_building_html(DOCUMENTS['caihong'], caihong_data)
@@ -509,19 +517,19 @@ def generate_combined_title(yueju_data, caihong_data):
     total = total_overdue + total_today
 
     if total == 0:
-        return '🏠 收租提醒 | 一切正常 · ' + datetime.now().strftime('%H:%M')
+        return '🏠 收租提醒 | 一切正常 · ' + beijing_now().strftime('%H:%M')
     
     parts = []
     if total_overdue > 0:
         parts.append(f'逾期{total_overdue}间')
     if total_today > 0:
         parts.append(f'今日交租{total_today}间')
-    return f'🏠 收租提醒 | {"·".join(parts)} | {total}间待处理 · ' + datetime.now().strftime('%H:%M')
+    return f'🏠 收租提醒 | {"·".join(parts)} | {total}间待处理 · ' + beijing_now().strftime('%H:%M')
 
 
 def generate_single_html(doc_config, data):
     """生成单个公寓的HTML（给朋友用）"""
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = beijing_now().strftime('%Y-%m-%d')
     count = len(data['overdue']) + len(data['today'])
 
     building_html = generate_building_html(doc_config, data)
