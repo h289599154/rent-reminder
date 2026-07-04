@@ -77,7 +77,7 @@ DOCUMENTS = {
 def should_push_now():
     """
     判断是否应该推送：
-    1. 当前小时在 PUSH_HOURS 中
+    1. 当前小时在推送时段（14或19），允许前后1小时容差
     2. 今天当前时段还没有推送过
     返回 True 表示可以推送，False 表示跳过
     """
@@ -85,10 +85,17 @@ def should_push_now():
     current_hour = now.hour
     today_str = now.strftime('%Y-%m-%d')
 
-    # 1. 检查当前小时是否在推送时段
-    if current_hour not in PUSH_HOURS:
-        logger.info(f"⏭ 当前小时 {current_hour}:00 不在推送时段 {PUSH_HOURS}，跳过")
+    # 1. 检查当前小时是否在推送时段（允许±1小时容差）
+    # 14点时段：13-15点都可以推，19点时段：18-20点都可以推
+    in_afternoon = 13 <= current_hour <= 15
+    in_evening = 18 <= current_hour <= 20
+
+    if not in_afternoon and not in_evening:
+        logger.info(f"⏭ 当前 {current_hour}:00 不在推送时段，跳过")
         return False
+
+    # 判断当前属于哪个时段
+    current_slot = 'afternoon' if in_afternoon else 'evening'
 
     # 2. 检查今天当前时段是否已推送过
     try:
@@ -96,9 +103,9 @@ def should_push_now():
             with open(PUSH_FLAG_FILE, 'r') as f:
                 data = json.load(f)
                 if data.get('date') == today_str:
-                    pushed_hours = data.get('pushed_hours', [])
-                    if current_hour in pushed_hours:
-                        logger.info(f"⏭ {today_str} {current_hour}:00 时段已推送过，跳过")
+                    pushed_slots = data.get('pushed_slots', [])
+                    if current_slot in pushed_slots:
+                        logger.info(f"⏭ {today_str} {current_slot} 时段已推送过，跳过")
                         return False
     except Exception:
         pass
@@ -111,19 +118,20 @@ def mark_pushed():
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
     current_hour = now.hour
+    current_slot = 'afternoon' if 13 <= current_hour <= 15 else 'evening'
 
     try:
-        data = {'date': today_str, 'pushed_hours': []}
+        data = {'date': today_str, 'pushed_slots': []}
         if os.path.exists(PUSH_FLAG_FILE):
             with open(PUSH_FLAG_FILE, 'r') as f:
                 data = json.load(f)
                 if data.get('date') != today_str:
-                    data = {'date': today_str, 'pushed_hours': []}
-        if current_hour not in data['pushed_hours']:
-            data['pushed_hours'].append(current_hour)
+                    data = {'date': today_str, 'pushed_slots': []}
+        if current_slot not in data['pushed_slots']:
+            data['pushed_slots'].append(current_slot)
         with open(PUSH_FLAG_FILE, 'w') as f:
             json.dump(data, f)
-        logger.info(f"✓ 标记 {current_hour}:00 时段已推送")
+        logger.info(f"✓ 标记 {current_slot} 时段已推送")
     except Exception as e:
         logger.warning(f"标记推送状态失败: {e}")
 
