@@ -33,9 +33,10 @@ ACCESS_TOKEN = os.environ.get('TENCENT_ACCESS_TOKEN', '')
 OPEN_ID = os.environ.get('TENCENT_OPEN_ID', '')
 CLIENT_SECRET = os.environ.get('TENCENT_CLIENT_SECRET', '')
 
-# ========== 企业微信群机器人配置（从环境变量读取） ==========
-WECOM_BOT_KEY = os.environ.get('WECOM_BOT_KEY', '')
-WECOM_BOT_URL = f'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_BOT_KEY}'
+# ========== PushPlus配置（从环境变量读取） ==========
+PUSHPLUS_TOKEN = os.environ.get('PUSHPLUS_TOKEN', '')
+FRIEND_PUSHPLUS_TOKEN = os.environ.get('FRIEND_PUSHPLUS_TOKEN', '')
+PUSHPLUS_API = 'http://www.pushplus.plus/send'
 
 # Token 提前提醒天数
 TOKEN_EXPIRE_WARN_DAYS = 7
