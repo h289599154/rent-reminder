@@ -2,7 +2,6 @@ name: 房租提醒
 
 on:
   schedule:
-    # 北京时间 14:00 和 19:00
     - cron: '0 6 * * *'
     - cron: '0 11 * * *'
   workflow_dispatch:

@@ -631,10 +631,9 @@ def main():
     if not FRIEND_PUSHPLUS_TOKEN:
         logger.warning("⚠️ 未配置 FRIEND_PUSHPLUS_TOKEN，悦居将不推送给朋友")
 
-    # 去重检查：如果今天当前时段已推送过，则跳过
-    if not should_push_now():
-        logger.info("⏭ 不需要推送，跳过本次执行")
-        return
+    # 去重检查：GitHub Actions 每次全新环境，/tmp不保留
+    # 改为：只要被触发就推送，由外部定时器控制频率
+    # PushPlus 标题带时间戳，避免重复内容被拦截
 
     try:
         # 检查Token有效期
@@ -698,9 +697,6 @@ def main():
                 send_pushplus(FRIEND_PUSHPLUS_TOKEN, friend_title, friend_html)
         else:
             logger.warning("⚠️ 未配置朋友token，跳过推送给朋友")
-
-        # 标记当前时段已推送
-        mark_pushed()
 
         logger.info("=" * 50)
         logger.info("房租提醒脚本执行完成")
