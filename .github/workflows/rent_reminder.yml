@@ -28,5 +28,6 @@ jobs:
           TENCENT_OPEN_ID: ${{ secrets.TENCENT_OPEN_ID }}
           TENCENT_CLIENT_SECRET: ${{ secrets.TENCENT_CLIENT_SECRET }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          FRIEND_PUSHPLUS_TOKEN: ${{ secrets.FRIEND_PUSHPLUS_TOKEN }}
+          FRIEND_B_TOKEN: ${{ secrets.FRIEND_B_TOKEN }}
+          FRIEND_C_TOKEN: ${{ secrets.FRIEND_C_TOKEN }}
         run: python rent_reminder.py
