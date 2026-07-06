@@ -103,55 +103,46 @@ def get_sheet_data(book_id, sheet_id, range_str):
     return result
 
 def check_sheet(doc):
+    """只返回今日交租的房间列表，包含租期"""
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today_day()
-    overdue, due = [], []
+    today_due = []
     skip = set(doc["skip_rows"])
     for i, row in enumerate(rows):
         rn = i + 1
         if rn in skip: continue
-        if len(row) < 7: continue
+        if len(row) < 8: continue  # 需保证有 H 列租金
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
         raw_status = str(row[6]).strip() if len(row) > 6 else ""
-        move = str(row[3]).strip() if len(row) > 3 else ""
-        info = {
-            "room": room,
-            "rent": str(row[7]).strip() if len(row) > 7 else "",
-            "payment": str(row[4]).strip() if len(row) > 4 else ""
-        }
-
-        # ---------- 多选控件处理 ----------
-        # 按逗号拆分，分别判断每个选项
-        has_owe = False
+        rent_start = str(row[2]).strip() if len(row) > 2 else ""
+        rent_end = str(row[3]).strip() if len(row) > 3 else ""
+        move = rent_end  # D列
+        # 多选控件：只要包含“付”或“无”就跳过
         has_paid = False
         if raw_status:
             for opt in raw_status.split(","):
                 opt = opt.strip()
-                if "欠" in opt:
-                    has_owe = True
                 if "付" in opt or "无" in opt:
                     has_paid = True
-
-        # 只要包含“欠”且没有“付/无”，就强制逾期
-        if has_owe and not has_paid:
-            overdue.append(info)
-            continue
-
-        # 包含“付”或“无”就跳过
+                    break
         if has_paid:
             continue
-        # ---------------------------------
+        # 跳过“欠”（逾期不提醒）
+        if raw_status and any("欠" in opt.strip() for opt in raw_status.split(",")):
+            continue
 
-        # 退租日逻辑（与昨晚版本一致）
         d = parse_day(move)
-        if d is not None:
-            if d < today:
-                info["days"] = today - d
-                overdue.append(info)
-            elif d == today:
-                due.append(info)
-    return overdue, due
+        if d is not None and d == today:
+            info = {
+                "room": room,
+                "rent": str(row[7]).strip() if len(row) > 7 else "",
+                "payment": str(row[4]).strip() if len(row) > 4 else "月付",
+                "rent_start": rent_start,
+                "rent_end": rent_end
+            }
+            today_due.append(info)
+    return today_due
 
 def check_token_expiry():
     try:
@@ -162,24 +153,18 @@ def check_token_expiry():
         return (exp - datetime.now(TZ).timestamp()) / 86400 <= 7
     except: return False
 
-def room_html(room, is_overdue, days=0):
+def room_html(room):
     rent = room.get("rent", "") or "?"
     pay = room.get("payment", "") or "月付"
     name = room["room"]
-    if is_overdue:
-        return f'<div style="margin:0;line-height:1.3"><b style="font-size:14px;color:#D4380D">{name}</b><span style="font-size:13px;color:#333"> ¥{rent}/月 · </span><span style="font-size:13px;color:#D4380D">逾期{days}天</span><br><span style="font-size:11px;color:#999">{pay}</span></div>'
-    else:
-        return f'<div style="margin:0;line-height:1.3"><b style="font-size:14px;color:#333">{name}</b><span style="font-size:13px;color:#333"> ¥{rent}/月</span><br><span style="font-size:11px;color:#999">{pay}</span></div>'
+    start = room.get("rent_start", "")
+    end = room.get("rent_end", "")
+    lease = f"{start} ~ {end}" if start and end else "未知租期"
+    return f'<div style="margin:0;line-height:1.3"><b style="font-size:14px;color:#333">{name}</b><span style="font-size:13px;color:#333"> ¥{rent}/月</span><br><span style="font-size:11px;color:#999">{lease} · {pay}</span></div>'
 
-def doc_card(doc, overdue, today):
-    if not overdue and not today: return ""
-    parts = []
-    for r in overdue:
-        parts.append(room_html(r, True, r.get("days", 0)))
-    if overdue and today:
-        parts.append(f'<div style="border-top:1px dashed {doc["color"]["border"]};margin:8px 0"></div>')
-    for r in today:
-        parts.append(room_html(r, False))
+def doc_card(doc, today_list):
+    if not today_list: return ""
+    parts = [room_html(r) for r in today_list]
     c = doc["color"]
     return f'''<div style="margin-bottom:12px">
         <h3 style="font-size:16px;margin:0 0 8px;padding-left:6px;border-left:3px solid {c['border']};color:{c['title']}">{doc['name']}</h3>
@@ -196,36 +181,34 @@ def main():
     try:
         all_data = {}
         for doc in DOCS:
-            overdue, today = check_sheet(doc)
-            all_data[doc["name"]] = (overdue, today)
-            print(f"{doc['name']}: 逾期{len(overdue)} 今日{len(today)}")
+            today_due = check_sheet(doc)
+            all_data[doc["name"]] = today_due
+            print(f"{doc['name']}: 今日交租{len(today_due)}间")
 
         for target, token in TOKEN_MAP.items():
             if not token: continue
             cards = []
-            total_overdue = 0
             total_today = 0
             for doc in DOCS:
                 if target not in doc["push_to"]: continue
-                overdue, today = all_data.get(doc["name"], ([], []))
-                if overdue or today:
-                    card = doc_card(doc, overdue, today)
+                today_due = all_data.get(doc["name"], [])
+                if today_due:
+                    card = doc_card(doc, today_due)
                     if card:
                         cards.append(card)
-                        total_overdue += len(overdue)
-                        total_today += len(today)
+                        total_today += len(today_due)
             if not cards:
-                print(f"{target} 无待处理房间，跳过")
+                print(f"{target} 无今日交租，跳过")
                 continue
 
             now = datetime.now(TZ).strftime("%H:%M")
-            title = f"🏠 收租提醒 | 逾期{total_overdue}间·今日交租{total_today}间 | {total_overdue+total_today}间待处理 · {now}"
+            title = f"🏠 今日交租 · {now}"
 
             today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {today_str}</h2>'
+            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日交租 · {today_str}</h2>'
             html += "".join(cards)
-            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_overdue+total_today} 间待处理</div>'
-            # 添加随机数避免重复拦截
+            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_today} 间今日交租</div>'
+            # 防重复随机数
             html += f"<!-- {random.randint(10000, 99999)} -->"
 
             send_pushplus(token, title, html)
