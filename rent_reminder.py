@@ -121,29 +121,29 @@ def check_sheet(doc):
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
 
-        # ---------- 多选控件核心修复 ----------
-        # 腾讯文档多选控件返回的文本格式如 "付,欠"，因此先按逗号拆分
-        # 判断拆分后的每一个选项
-        has_paid = False
+        # ---------- 多选控件处理 ----------
+        # G列可能是 "付,欠" 这种形式，按逗号拆分后独立判断
         has_owe = False
+        has_paid = False
         if raw_status:
-            options = [opt.strip() for opt in raw_status.split(',')]
-            for opt in options:
+            for opt in raw_status.split(","):
+                opt = opt.strip()
                 if "欠" in opt:
                     has_owe = True
                 if "付" in opt or "无" in opt:
                     has_paid = True
-        
-        # 只要包含“欠”就强制逾期（除非同时包含“付”或“无”，则跳过）
+
+        # 只要包含“欠”且没有“付/无”，就强制逾期
         if has_owe and not has_paid:
             overdue.append(info)
             continue
-        
+
         # 包含“付”或“无”就跳过
         if has_paid:
             continue
-        # ---------- 多选控件修复完毕 ----------
+        # ---------------------------------
 
+        # 退租日逻辑（与昨晚版本一致）
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -187,9 +187,11 @@ def doc_card(doc, overdue, today):
     </div>'''
 
 def send_pushplus(token, title, content):
-    requests.post("http://www.pushplus.plus/send", json={
+    resp = requests.post("http://www.pushplus.plus/send", json={
         "token": token, "title": title, "content": content, "template": "html"
     }, timeout=10)
+    result = resp.json()
+    print(f"PushPlus 返回: {result}")
 
 def main():
     try:
