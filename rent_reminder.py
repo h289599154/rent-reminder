@@ -1,14 +1,3 @@
-TOKEN="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"
-REPO="h289599154/rent-reminder"
-FILE="rent_reminder.py"
-BRANCH="main"
-
-# 获取最新 SHA
-SHA=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.github.com/repos/$REPO/contents/$FILE?ref=$BRANCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])")
-
-# 纯净版代码（无任何污染）
-PYTHON_CODE=$(cat <<'PYEOF'
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os, sys, json, base64, requests, traceback
@@ -131,15 +120,11 @@ def check_sheet(doc):
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
-        # 你的 Excel 逻辑：
-        # 1. G列包含"欠" → 强制逾期
         if "欠" in status:
             overdue.append(info)
             continue
-        # 2. G列包含"付"或"无" → 跳过
         if "付" in status or "无" in status:
             continue
-        # 3. 退租日非空，且今天日数 >= 退租日日数
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -242,20 +227,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-PYEOF
-)
-
-# Base64 编码并提交
-ENCODED=$(echo -n "$PYTHON_CODE" | base64 -w0)
-curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"message\":\"Clean fix - Excel logic + relax pay check\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\",\"branch\":\"$BRANCH\"}" \
-  "https://api.github.com/repos/$REPO/contents/$FILE"
-echo ""
-echo "✅ 纯净版脚本已提交"# 触发测试
-
-curl -s -X POST -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/repos/$REPO/actions/workflows/rent_reminder.yml/dispatches" \
-  -d '{"ref":"main"}'
-echo "✅ 已触发测试，请稍后查看微信"
