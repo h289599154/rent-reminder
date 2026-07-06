@@ -1,8 +1,5 @@
 name: Rent Reminder Daily
 on:
-  workflow_dispatch:  # 这一行是新增的
-  schedule:
-    - cron: '0 5 * * *'
   schedule:
     - cron: '0 5 * * *'
   workflow_dispatch:
