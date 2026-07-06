@@ -13,10 +13,9 @@ FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 SHEETS = {
     "悦居": {"book_id":"300000000$NGUIfHYzcqNf","sheet_id":"aopwxm","range":"A1:H80","skip_rows":[11,22,33,44,55,66]},
     "彩虹": {"book_id":"300000000$NowDLTtMyFxt","sheet_id":"aopwxm","range":"A1:H50","skip_rows":[15,25,35]},
-    # 修正后的 book_id（直接使用链接中的编码）
     "乐乐": {"book_id":"DTkVrZ2F2ekhabFdp","sheet_id":"aopwxm","range":"A1:H200","skip_rows":[]},
-    "狮大": {"book_id":"DTlZHY2t6dmJGZWlu","sheet_id":"aopwxm","range":"A1:H150","skip_rows":[]},
-    "骆家": {"book_id":"DTmFJT3NvTk9tbXJ5","sheet_id":"aopwxm","range":"A1:H200","skip_rows":[]},
+    "狮大": {"book_id":"DTlZHY2t6dmJGZWlu","sheet_id":"BB08J2","range":"A1:H150","skip_rows":[]},
+    "骆家": {"book_id":"DTmFJT3NvTk9tbXJ5","sheet_id":"BB08J2","range":"A1:H200","skip_rows":[]},
 }
 
 TZ = timezone(timedelta(hours=8))
