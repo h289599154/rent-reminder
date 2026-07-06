@@ -66,7 +66,6 @@ TOKEN_MAP = {
     "friend_c": FRIEND_C_TOKEN
 }
 
-# ---------- 昨晚版本的核心逻辑 ----------
 def get_today_day():
     return datetime.now(TZ).day
 
@@ -114,19 +113,37 @@ def check_sheet(doc):
         if len(row) < 7: continue
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
-        status = str(row[6]).strip() if len(row) > 6 else ""
+        raw_status = str(row[6]).strip() if len(row) > 6 else ""
         move = str(row[3]).strip() if len(row) > 3 else ""
         info = {
             "room": room,
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
-        # 昨晚的严格相等判断
-        if status == "欠":
+
+        # ---------- 多选控件核心修复 ----------
+        # 腾讯文档多选控件返回的文本格式如 "付,欠"，因此先按逗号拆分
+        # 判断拆分后的每一个选项
+        has_paid = False
+        has_owe = False
+        if raw_status:
+            options = [opt.strip() for opt in raw_status.split(',')]
+            for opt in options:
+                if "欠" in opt:
+                    has_owe = True
+                if "付" in opt or "无" in opt:
+                    has_paid = True
+        
+        # 只要包含“欠”就强制逾期（除非同时包含“付”或“无”，则跳过）
+        if has_owe and not has_paid:
             overdue.append(info)
             continue
-        if status in ("付", "无"):
+        
+        # 包含“付”或“无”就跳过
+        if has_paid:
             continue
+        # ---------- 多选控件修复完毕 ----------
+
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -135,7 +152,6 @@ def check_sheet(doc):
             elif d == today:
                 due.append(info)
     return overdue, due
-# ---------- 以上是昨晚版本的逻辑 ----------
 
 def check_token_expiry():
     try:
