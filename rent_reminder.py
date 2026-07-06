@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os, sys, json, base64, requests, traceback
 from datetime import datetime, timezone, timedelta
+import random
 
 CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
 ACCESS_TOKEN = os.environ["TENCENT_ACCESS_TOKEN"]
@@ -113,37 +114,19 @@ def check_sheet(doc):
         if len(row) < 7: continue
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
-        raw_status = str(row[6]).strip() if len(row) > 6 else ""
+        status = str(row[6]).strip() if len(row) > 6 else ""
         move = str(row[3]).strip() if len(row) > 3 else ""
         info = {
             "room": room,
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
-
-        # ---------- 多选控件处理 ----------
-        # G列可能是 "付,欠" 这种形式，按逗号拆分后独立判断
-        has_owe = False
-        has_paid = False
-        if raw_status:
-            for opt in raw_status.split(","):
-                opt = opt.strip()
-                if "欠" in opt:
-                    has_owe = True
-                if "付" in opt or "无" in opt:
-                    has_paid = True
-
-        # 只要包含“欠”且没有“付/无”，就强制逾期
-        if has_owe and not has_paid:
+        # 暂时保留昨晚的严格判断，后续再单独加多选处理
+        if status == "欠":
             overdue.append(info)
             continue
-
-        # 包含“付”或“无”就跳过
-        if has_paid:
+        if status in ("付", "无"):
             continue
-        # ---------------------------------
-
-        # 退租日逻辑（与昨晚版本一致）
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -190,8 +173,7 @@ def send_pushplus(token, title, content):
     resp = requests.post("http://www.pushplus.plus/send", json={
         "token": token, "title": title, "content": content, "template": "html"
     }, timeout=10)
-    result = resp.json()
-    print(f"PushPlus 返回: {result}")
+    print(f"PushPlus 返回: {resp.json()}")
 
 def main():
     try:
@@ -220,11 +202,9 @@ def main():
                 continue
 
             now = datetime.now(TZ).strftime("%H:%M")
-            title = "🏠 收租提醒 | "
-            if total_overdue: title += f"逾期{total_overdue}间"
-            if total_overdue and total_today: title += "·"
-            if total_today: title += f"今日交租{total_today}间"
-            title += f" | {total_overdue+total_today}间待处理 · {now}"
+            # 加入随机数，避免重复推送被拦截
+            rand = random.randint(100, 999)
+            title = f"🏠 收租提醒 | 逾期{total_overdue}间·今日交租{total_today}间 | {total_overdue+total_today}间待处理 · {now}.{rand}"
 
             today_str = datetime.now(TZ).strftime("%Y-%m-%d")
             html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {today_str}</h2>'
