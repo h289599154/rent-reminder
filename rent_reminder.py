@@ -3,7 +3,6 @@
 import os, sys, json, base64, requests, traceback
 from datetime import datetime, timezone, timedelta
 
-# 环境变量
 CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
 ACCESS_TOKEN = os.environ["TENCENT_ACCESS_TOKEN"]
 OPEN_ID = os.environ["TENCENT_OPEN_ID"]
@@ -11,10 +10,8 @@ PUSHPLUS_TOKEN = os.environ["PUSHPLUS_TOKEN"]
 FRIEND_B_TOKEN = os.environ["FRIEND_B_TOKEN"]
 FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 
-# 北京时区
 TZ = timezone(timedelta(hours=8))
 
-# 文档配置（按你的部署包）
 DOCS = [
     {
         "name": "悦居",
@@ -63,14 +60,12 @@ DOCS = [
     }
 ]
 
-# 推送 token 映射
 TOKEN_MAP = {
     "owner": PUSHPLUS_TOKEN,
     "friend_b": FRIEND_B_TOKEN,
     "friend_c": FRIEND_C_TOKEN
 }
 
-# ---------- 工具函数 ----------
 def get_today_day():
     return datetime.now(TZ).day
 
@@ -82,7 +77,6 @@ def parse_day(cell):
     return None
 
 def get_sheet_data(book_id, sheet_id, range_str):
-    """V3 API 读取"""
     url = f"https://docs.qq.com/openapi/spreadsheet/v3/files/{book_id}/{sheet_id}/{range_str}"
     headers = {"Access-Token": ACCESS_TOKEN, "Client-Id": CLIENT_ID, "Open-Id": OPEN_ID}
     resp = requests.get(url, headers=headers, timeout=30)
@@ -109,7 +103,6 @@ def get_sheet_data(book_id, sheet_id, range_str):
     return result
 
 def check_sheet(doc):
-    """返回 (逾期列表, 今日列表)"""
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today_day()
     overdue, due = [], []
@@ -122,16 +115,18 @@ def check_sheet(doc):
         if not room: continue
         status = str(row[6]).strip() if len(row) > 6 else ""
         move = str(row[3]).strip() if len(row) > 3 else ""
-        # 构建房间信息
         info = {
             "room": room,
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
-        if status == "欠":
+        # 【修复】宽松判断 G 列状态，包含"欠"才逾期
+        if "欠" in status:
             overdue.append(info)
             continue
-        if status in ("付", "无"): continue
+        # 【修复】包含"付"或"无"就跳过
+        if "付" in status or "无" in status:
+            continue
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -150,7 +145,6 @@ def check_token_expiry():
         return (exp - datetime.now(TZ).timestamp()) / 86400 <= 7
     except: return False
 
-# ---------- HTML 生成 ----------
 def room_html(room, is_overdue, days=0):
     rent = room.get("rent", "") or "?"
     pay = room.get("payment", "") or "月付"
@@ -180,26 +174,21 @@ def send_pushplus(token, title, content):
         "token": token, "title": title, "content": content, "template": "html"
     }, timeout=10)
 
-# ---------- 主流程 ----------
 def main():
     try:
-        # 1. 读取所有文档
-        all_data = {}  # key: doc_name, value: (overdue, today)
+        all_data = {}
         for doc in DOCS:
             overdue, today = check_sheet(doc)
             all_data[doc["name"]] = (overdue, today)
             print(f"{doc['name']}: 逾期{len(overdue)} 今日{len(today)}")
 
-        # 2. 按接收人分组推送
         for target, token in TOKEN_MAP.items():
             if not token: continue
-            # 收集目标文档卡片
             cards = []
             total_overdue = 0
             total_today = 0
             for doc in DOCS:
-                if target not in doc["push_to"]:
-                    continue
+                if target not in doc["push_to"]: continue
                 overdue, today = all_data.get(doc["name"], ([], []))
                 if overdue or today:
                     card = doc_card(doc, overdue, today)
@@ -211,7 +200,6 @@ def main():
                 print(f"{target} 无待处理房间，跳过")
                 continue
 
-            # 生成标题和内容
             now = datetime.now(TZ).strftime("%H:%M")
             title = "🏠 收租提醒 | "
             if total_overdue: title += f"逾期{total_overdue}间"
@@ -227,16 +215,15 @@ def main():
             send_pushplus(token, title, html)
             print(f"已推送 {target}: {title}")
 
-        # Token 过期提醒
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
-                          '<div style="color:#D4380D;font-size:15px;font-weight:bold">请及时续期Token</div><p>打开 https://docs.qq.com/open/developers/ 点"重置"获取新token</p >')
+                          '<div style="color:#D4380D;font-size:15px;font-weight:bold">请及时续期Token</div><p>打开 https://docs.qq.com/open/developers/ 点"重置"获取新token</p>')
         print("脚本正常结束")
     except Exception as e:
         err_info = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         print(err_info)
         try:
-            send_pushplus(PUSHPLUS_TOKEN, "收租提醒异常", f"❌ {err_info}", )
+            send_pushplus(PUSHPLUS_TOKEN, "收租提醒异常", f"❌ {err_info}")
         except: pass
         sys.exit(1)
 
