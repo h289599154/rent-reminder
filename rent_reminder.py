@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, json, base64, requests, traceback
+import os, sys, json, base64, requests, traceback, re
 from datetime import datetime, timezone, timedelta
 
 CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
@@ -72,6 +72,7 @@ def get_today_day():
 def parse_day(cell):
     if not cell: return None
     cell = str(cell).strip()
+    # 只提取日期中的日数
     if "-" in cell: return int(cell.split("-")[-1])
     if "/" in cell: return int(cell.split("/")[-1])
     return None
@@ -102,6 +103,17 @@ def get_sheet_data(book_id, sheet_id, range_str):
         result.append(cells)
     return result
 
+def clean_status(s):
+    """清洗G列内容：去空格、换行、全角转半角，只保留关键信息"""
+    import unicodedata
+    if not s: return ""
+    s = s.strip()
+    # 全角转半角
+    s = unicodedata.normalize('NFKC', s)
+    # 去除所有不可见字符
+    s = re.sub(r'\s+', '', s)
+    return s
+
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today_day()
@@ -113,25 +125,37 @@ def check_sheet(doc):
         if len(row) < 7: continue
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
-        status = str(row[6]).strip() if len(row) > 6 else ""
+        raw_status = str(row[6]) if len(row) > 6 else ""
+        status = clean_status(raw_status)
         move = str(row[3]).strip() if len(row) > 3 else ""
         info = {
             "room": room,
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
+        # 调试输出：显示G列原始值和清洗值
+        print(f"  {doc['name']}-{room} | G列原始='{raw_status}' 清洗='{status}' | D列={move}", end="")
+        # 核心判断
         if "欠" in status:
             overdue.append(info)
+            print(" -> 逾期(欠)")
             continue
         if "付" in status or "无" in status:
+            print(" -> 跳过(已付/无)")
             continue
         d = parse_day(move)
         if d is not None:
             if d < today:
                 info["days"] = today - d
                 overdue.append(info)
+                print(f" -> 逾期(退租日{d}<{today})")
             elif d == today:
                 due.append(info)
+                print(" -> 今日交租")
+            else:
+                print(" -> 未到期")
+        else:
+            print(" -> 退租日无效，忽略")
     return overdue, due
 
 def check_token_expiry():
@@ -176,9 +200,10 @@ def main():
     try:
         all_data = {}
         for doc in DOCS:
+            print(f"\n=== {doc['name']} ===")
             overdue, today = check_sheet(doc)
             all_data[doc["name"]] = (overdue, today)
-            print(f"{doc['name']}: 逾期{len(overdue)} 今日{len(today)}")
+            print(f"  >> 逾期{len(overdue)}间, 今日交租{len(today)}间")
 
         for target, token in TOKEN_MAP.items():
             if not token: continue
