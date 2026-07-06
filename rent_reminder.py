@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, json, base64, requests, traceback
+import os, sys, json, base64, requests, traceback, re, unicodedata
 from datetime import datetime, timezone, timedelta
 
 CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
@@ -102,6 +102,18 @@ def get_sheet_data(book_id, sheet_id, range_str):
         result.append(cells)
     return result
 
+def clean_status(raw):
+    """终极清洗：去除所有空格、换行、全角转半角、不可见字符"""
+    if not raw: return ""
+    s = str(raw).strip()
+    # 全角转半角
+    s = unicodedata.normalize('NFKC', s)
+    # 去除所有不可见字符
+    s = re.sub(r'\s+', '', s)
+    # 去除零宽字符
+    s = s.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
+    return s
+
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today_day()
@@ -113,37 +125,21 @@ def check_sheet(doc):
         if len(row) < 7: continue
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
-        raw_status = str(row[6]).strip() if len(row) > 6 else ""
+        raw_status = str(row[6]) if len(row) > 6 else ""
+        status = clean_status(raw_status)
         move = str(row[3]).strip() if len(row) > 3 else ""
         info = {
             "room": room,
             "rent": str(row[7]).strip() if len(row) > 7 else "",
             "payment": str(row[4]).strip() if len(row) > 4 else ""
         }
-
-        # ---------- 多选控件处理 ----------
-        # G列可能是 "付,欠" 这种形式，按逗号拆分后独立判断
-        has_owe = False
-        has_paid = False
-        if raw_status:
-            for opt in raw_status.split(","):
-                opt = opt.strip()
-                if "欠" in opt:
-                    has_owe = True
-                if "付" in opt or "无" in opt:
-                    has_paid = True
-
-        # 只要包含“欠”且没有“付/无”，就强制逾期
-        if has_owe and not has_paid:
+        # 【终极判断】
+        if "欠" in status:
             overdue.append(info)
             continue
-
-        # 包含“付”或“无”就跳过
-        if has_paid:
+        # 只要清洗后的G列包含“付”或“无”，无条件跳过
+        if "付" in status or "无" in status:
             continue
-        # ---------------------------------
-
-        # 退租日逻辑（与昨晚版本一致）
         d = parse_day(move)
         if d is not None:
             if d < today:
@@ -187,11 +183,9 @@ def doc_card(doc, overdue, today):
     </div>'''
 
 def send_pushplus(token, title, content):
-    resp = requests.post("http://www.pushplus.plus/send", json={
+    requests.post("http://www.pushplus.plus/send", json={
         "token": token, "title": title, "content": content, "template": "html"
     }, timeout=10)
-    result = resp.json()
-    print(f"PushPlus 返回: {result}")
 
 def main():
     try:
