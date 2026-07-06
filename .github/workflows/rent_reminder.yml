@@ -1,33 +1,37 @@
-name: 房租提醒
-
+name: Rent Reminder Daily
 on:
   schedule:
-    - cron: '0 6 * * *'
-    - cron: '0 11 * * *'
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
+env:
+  TZ: Asia/Shanghai
+
 jobs:
-  remind:
+  run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run rent reminder
+      - run: pip install -r requirements.txt
+      - name: Run reminder
         env:
           TENCENT_CLIENT_ID: ${{ secrets.TENCENT_CLIENT_ID }}
           TENCENT_ACCESS_TOKEN: ${{ secrets.TENCENT_ACCESS_TOKEN }}
           TENCENT_OPEN_ID: ${{ secrets.TENCENT_OPEN_ID }}
-          TENCENT_CLIENT_SECRET: ${{ secrets.TENCENT_CLIENT_SECRET }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           FRIEND_B_TOKEN: ${{ secrets.FRIEND_B_TOKEN }}
           FRIEND_C_TOKEN: ${{ secrets.FRIEND_C_TOKEN }}
         run: python rent_reminder.py
+      - name: Keep repo alive
+        run: echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') - 每日保活" > alive.txt
+      - name: Commit alive signal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add alive.txt
+          git diff --staged --quiet || git commit -m "🤖 每日保活签到 [skip ci]"
+      - name: Push alive signal
+        run: git push
