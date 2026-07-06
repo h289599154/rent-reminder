@@ -1,122 +1,261 @@
-import requests
-import base64
-import json
-import time
+TOKEN="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"
+REPO="h289599154/rent-reminder"
+FILE="rent_reminder.py"
+BRANCH="main"
 
-TOKEN = "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"
-REPO = "h289599154/rent-reminder"
-FILE = "rent_reminder.py"
-BRANCH = "main"
+# 获取最新 SHA
+SHA=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/$REPO/contents/$FILE?ref=$BRANCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])")
 
-# 1. 获取文件 SHA
-resp = requests.get(
-    f"https://api.github.com/repos/{REPO}/contents/{FILE}?ref={BRANCH}",
-    headers={"Authorization": f"Bearer {TOKEN}"}
-)
-sha = resp.json()["sha"]
-print("SHA:", sha)
-
-# 2. 准备测试代码
-content = """#!/usr/bin/env python3
-import os, sys, json, base64, requests
+# 纯净版代码（无任何污染）
+PYTHON_CODE=$(cat <<'PYEOF'
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os, sys, json, base64, requests, traceback
 from datetime import datetime, timezone, timedelta
 
-print("=== 脚本启动 ===")
+CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
+ACCESS_TOKEN = os.environ["TENCENT_ACCESS_TOKEN"]
+OPEN_ID = os.environ["TENCENT_OPEN_ID"]
+PUSHPLUS_TOKEN = os.environ["PUSHPLUS_TOKEN"]
+FRIEND_B_TOKEN = os.environ["FRIEND_B_TOKEN"]
+FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 
-CLIENT_ID = os.environ.get("TENCENT_CLIENT_ID", "")
-ACCESS_TOKEN = os.environ.get("TENCENT_ACCESS_TOKEN", "")
-OPEN_ID = os.environ.get("TENCENT_OPEN_ID", "")
-PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
-FRIEND_B_TOKEN = os.environ.get("FRIEND_B_TOKEN", "")
-FRIEND_C_TOKEN = os.environ.get("FRIEND_C_TOKEN", "")
+TZ = timezone(timedelta(hours=8))
 
-print("环境变量读取完成")
-print("ACCESS_TOKEN长度:", len(ACCESS_TOKEN))
-print("PUSHPLUS_TOKEN长度:", len(PUSHPLUS_TOKEN))
+DOCS = [
+    {
+        "name": "悦居",
+        "book_id": "300000000$NGUIfHYzcqNf",
+        "sheet_id": "aopwxm",
+        "range": "A1:H80",
+        "skip_rows": [11, 22, 33, 44, 55, 66],
+        "push_to": ["owner", "friend_b"],
+        "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"}
+    },
+    {
+        "name": "彩虹",
+        "book_id": "300000000$NowDLTtMyFxt",
+        "sheet_id": "aopwxm",
+        "range": "A1:H50",
+        "skip_rows": [15, 25, 35],
+        "push_to": ["owner"],
+        "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"}
+    },
+    {
+        "name": "乐乐",
+        "book_id": "300000000$NEkgavzHZlWi",
+        "sheet_id": "aopwxm",
+        "range": "A1:H200",
+        "skip_rows": [],
+        "push_to": ["friend_c"],
+        "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
+    },
+    {
+        "name": "狮大",
+        "book_id": "300000000$NVGckzvbFein",
+        "sheet_id": "BB08J2",
+        "range": "A1:H150",
+        "skip_rows": [],
+        "push_to": ["friend_c"],
+        "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
+    },
+    {
+        "name": "骆家2栋",
+        "book_id": "300000000$NaIOsoNOmmry",
+        "sheet_id": "BB08J2",
+        "range": "A1:H200",
+        "skip_rows": [],
+        "push_to": ["friend_c"],
+        "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
+    }
+]
 
-try:
-    url = "https://docs.qq.com/openapi/spreadsheet/v3/files/300000000$NGUIfHYzcqNf/aopwxm/A1:H5"
+TOKEN_MAP = {
+    "owner": PUSHPLUS_TOKEN,
+    "friend_b": FRIEND_B_TOKEN,
+    "friend_c": FRIEND_C_TOKEN
+}
+
+def get_today_day():
+    return datetime.now(TZ).day
+
+def parse_day(cell):
+    if not cell: return None
+    cell = str(cell).strip()
+    if "-" in cell: return int(cell.split("-")[-1])
+    if "/" in cell: return int(cell.split("/")[-1])
+    return None
+
+def get_sheet_data(book_id, sheet_id, range_str):
+    url = f"https://docs.qq.com/openapi/spreadsheet/v3/files/{book_id}/{sheet_id}/{range_str}"
     headers = {"Access-Token": ACCESS_TOKEN, "Client-Id": CLIENT_ID, "Open-Id": OPEN_ID}
     resp = requests.get(url, headers=headers, timeout=30)
-    print("API状态码:", resp.status_code)
-    if resp.status_code == 200:
-        data = resp.json()
-        rows = data.get("gridData", {}).get("rows", [])
-        print("读取行数:", len(rows))
-        if rows:
-            print("第一行数据:", rows[0])
+    if resp.status_code != 200:
+        raise Exception(f"API {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    rows_raw = data.get("gridData", {}).get("rows", [])
+    result = []
+    for row in rows_raw:
+        vals = row.get("values", [])
+        if not vals: continue
+        cells = []
+        for v in vals:
+            cv = v.get("cellValue", {})
+            if not cv:
+                cells.append("")
+            elif v.get("dataType") == "TIME":
+                t = cv.get("time", {})
+                y, m, d = t.get("year", ""), t.get("month", ""), t.get("day", "")
+                cells.append(f"{y}-{str(m).zfill(2)}-{str(d).zfill(2)}" if y and m and d else "")
+            else:
+                cells.append(str(cv.get("text", "") or cv.get("number", "")))
+        result.append(cells)
+    return result
+
+def check_sheet(doc):
+    rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
+    today = get_today_day()
+    overdue, due = [], []
+    skip = set(doc["skip_rows"])
+    for i, row in enumerate(rows):
+        rn = i + 1
+        if rn in skip: continue
+        if len(row) < 7: continue
+        room = str(row[0]).strip() if row[0] else ""
+        if not room: continue
+        status = str(row[6]).strip() if len(row) > 6 else ""
+        move = str(row[3]).strip() if len(row) > 3 else ""
+        info = {
+            "room": room,
+            "rent": str(row[7]).strip() if len(row) > 7 else "",
+            "payment": str(row[4]).strip() if len(row) > 4 else ""
+        }
+        # 你的 Excel 逻辑：
+        # 1. G列包含"欠" → 强制逾期
+        if "欠" in status:
+            overdue.append(info)
+            continue
+        # 2. G列包含"付"或"无" → 跳过
+        if "付" in status or "无" in status:
+            continue
+        # 3. 退租日非空，且今天日数 >= 退租日日数
+        d = parse_day(move)
+        if d is not None:
+            if d < today:
+                info["days"] = today - d
+                overdue.append(info)
+            elif d == today:
+                due.append(info)
+    return overdue, due
+
+def check_token_expiry():
+    try:
+        p = ACCESS_TOKEN.split(".")[1]
+        p += "=" * (4 - len(p) % 4)
+        d = json.loads(base64.urlsafe_b64decode(p))
+        exp = d.get("exp", 0)
+        return (exp - datetime.now(TZ).timestamp()) / 86400 <= 7
+    except: return False
+
+def room_html(room, is_overdue, days=0):
+    rent = room.get("rent", "") or "?"
+    pay = room.get("payment", "") or "月付"
+    name = room["room"]
+    if is_overdue:
+        return f'<div style="margin:0;line-height:1.3"><b style="font-size:14px;color:#D4380D">{name}</b><span style="font-size:13px;color:#333"> ¥{rent}/月 · </span><span style="font-size:13px;color:#D4380D">逾期{days}天</span><br><span style="font-size:11px;color:#999">{pay}</span></div>'
     else:
-        print("API错误:", resp.text[:200])
-except Exception as e:
-    print("API请求异常:", str(e))
+        return f'<div style="margin:0;line-height:1.3"><b style="font-size:14px;color:#333">{name}</b><span style="font-size:13px;color:#333"> ¥{rent}/月</span><br><span style="font-size:11px;color:#999">{pay}</span></div>'
 
-try:
-    push_resp = requests.post("http://www.pushplus.plus/send", json={
-        "token": PUSHPLUS_TOKEN,
-        "title": "测试推送",
-        "content": "如果收到此消息，说明脚本正常运行。",
-        "template": "txt"
+def doc_card(doc, overdue, today):
+    if not overdue and not today: return ""
+    parts = []
+    for r in overdue:
+        parts.append(room_html(r, True, r.get("days", 0)))
+    if overdue and today:
+        parts.append(f'<div style="border-top:1px dashed {doc["color"]["border"]};margin:8px 0"></div>')
+    for r in today:
+        parts.append(room_html(r, False))
+    c = doc["color"]
+    return f'''<div style="margin-bottom:12px">
+        <h3 style="font-size:16px;margin:0 0 8px;padding-left:6px;border-left:3px solid {c['border']};color:{c['title']}">{doc['name']}</h3>
+        <div style="background:{c['bg']};border-radius:8px;padding:10px 13px">{"".join(parts)}</div>
+    </div>'''
+
+def send_pushplus(token, title, content):
+    requests.post("http://www.pushplus.plus/send", json={
+        "token": token, "title": title, "content": content, "template": "html"
     }, timeout=10)
-    print("PushPlus状态码:", push_resp.status_code)
-    print("PushPlus返回:", push_resp.text[:200])
-except Exception as e:
-    print("PushPlus异常:", str(e))
 
-print("=== 脚本结束 ===")
-"""
+def main():
+    try:
+        all_data = {}
+        for doc in DOCS:
+            overdue, today = check_sheet(doc)
+            all_data[doc["name"]] = (overdue, today)
+            print(f"{doc['name']}: 逾期{len(overdue)} 今日{len(today)}")
 
-# Base64 编码
-content_bytes = content.encode('utf-8')
-content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+        for target, token in TOKEN_MAP.items():
+            if not token: continue
+            cards = []
+            total_overdue = 0
+            total_today = 0
+            for doc in DOCS:
+                if target not in doc["push_to"]: continue
+                overdue, today = all_data.get(doc["name"], ([], []))
+                if overdue or today:
+                    card = doc_card(doc, overdue, today)
+                    if card:
+                        cards.append(card)
+                        total_overdue += len(overdue)
+                        total_today += len(today)
+            if not cards:
+                print(f"{target} 无待处理房间，跳过")
+                continue
 
-# 3. 提交文件
-data = {
-    "message": "Test script - clean version",
-    "content": content_b64,
-    "sha": sha,
-    "branch": BRANCH
-}
-resp = requests.put(
-    f"https://api.github.com/repos/{REPO}/contents/{FILE}",
-    headers={"Authorization": f"Bearer {TOKEN}"},
-    json=data
+            now = datetime.now(TZ).strftime("%H:%M")
+            title = "🏠 收租提醒 | "
+            if total_overdue: title += f"逾期{total_overdue}间"
+            if total_overdue and total_today: title += "·"
+            if total_today: title += f"今日交租{total_today}间"
+            title += f" | {total_overdue+total_today}间待处理 · {now}"
+
+            today_str = datetime.now(TZ).strftime("%Y-%m-%d")
+            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租提醒 · {today_str}</h2>'
+            html += "".join(cards)
+            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_overdue+total_today} 间待处理</div>'
+
+            send_pushplus(token, title, html)
+            print(f"已推送 {target}: {title}")
+
+        if check_token_expiry():
+            send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
+                          '<div style="color:#D4380D;font-size:15px;font-weight:bold">请及时续期Token</div><p>打开 https://docs.qq.com/open/developers/ 点"重置"获取新token</p>')
+        print("脚本正常结束")
+    except Exception as e:
+        err_info = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        print(err_info)
+        try:
+            send_pushplus(PUSHPLUS_TOKEN, "收租提醒异常", f"❌ {err_info}")
+        except: pass
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+PYEOF
 )
-print("提交状态码:", resp.status_code)
-if resp.status_code == 200:
-    print("✅ 代码已提交")
-else:
-    print("提交失败:", resp.text[:200])
 
-# 4. 触发工作流
-resp = requests.post(
-    f"https://api.github.com/repos/{REPO}/actions/workflows/rent_reminder.yml/dispatches",
-    headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"},
-    json={"ref": "main"}
-)
-print("触发状态码:", resp.status_code)
-print("等待30秒...")
-time.sleep(30)
+# Base64 编码并提交
+ENCODED=$(echo -n "$PYTHON_CODE" | base64 -w0)
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\":\"Clean fix - Excel logic + relax pay check\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\",\"branch\":\"$BRANCH\"}" \
+  "https://api.github.com/repos/$REPO/contents/$FILE"
+echo ""
+echo "✅ 纯净版脚本已提交"# 触发测试
 
-# 5. 获取最新运行日志
-runs_resp = requests.get(
-    f"https://api.github.com/repos/{REPO}/actions/runs?per_page=1",
-    headers={"Authorization": f"Bearer {TOKEN}"}
-)
-runs_data = runs_resp.json()
-run_id = runs_data["workflow_runs"][0]["id"]
-print("最新 Run ID:", run_id)
-
-jobs_resp = requests.get(
-    f"https://api.github.com/repos/{REPO}/actions/runs/{run_id}/jobs",
-    headers={"Authorization": f"Bearer {TOKEN}"}
-)
-jobs_data = jobs_resp.json()
-job_id = jobs_data["jobs"][0]["id"]
-print("Job ID:", job_id)
-
-logs_resp = requests.get(
-    f"https://api.github.com/repos/{REPO}/actions/jobs/{job_id}/logs",
-    headers={"Authorization": f"Bearer {TOKEN}"}
-)
-print("=== 日志 ===")
-print(logs_resp.text[-1000:])  # 最后1000字符
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/$REPO/actions/workflows/rent_reminder.yml/dispatches" \
+  -d '{"ref":"main"}'
+echo "✅ 已触发测试，请稍后查看微信"
