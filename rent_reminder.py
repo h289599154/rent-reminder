@@ -98,7 +98,7 @@ def get_sheet_data(book_id, sheet_id, range_str):
                 y, m, d = t.get("year", ""), t.get("month", ""), t.get("day", "")
                 cells.append(f"{y}-{str(m).zfill(2)}-{str(d).zfill(2)}" if y and m and d else "")
             elif v.get("dataType") == "SELECT":
-                # 处理下拉菜单控件
+                # 下拉菜单：从 select 字段提取文本
                 sel = cv.get("select", {})
                 options = sel.get("options", [])
                 selected_values = sel.get("value", [])
@@ -132,32 +132,37 @@ def check_sheet(doc):
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
 
+        # G列状态（下拉菜单）
         raw_status = str(row[6]) if len(row) > 6 else ""
         status = clean_text(raw_status)
-        move = str(row[3]).strip() if len(row) > 3 else ""
 
-        info = {
-            "room": room,
-            "rent": str(row[7]).strip() if len(row) > 7 else "",
-            "payment": str(row[4]).strip() if len(row) > 4 else "月付",
-            "rent_start": str(row[2]).strip() if len(row) > 2 else "",
-            "rent_end": move
-        }
-
-        # 调试打印
-        if room in ("206", "509"):
-            print(f"调试: {doc['name']}-{room} | G列原始='{raw_status}' | 清洗后='{status}' | D列={move}")
-
-        # 付 → 跳过
+        # 1. 付 → 跳过
         if status == "付":
             continue
-        # 欠 → 强制提醒
+
+        # 2. 欠 → 强制提醒（不管交租日）
         if status == "欠":
+            info = {
+                "room": room,
+                "rent": str(row[7]).strip() if len(row) > 7 else "",
+                "payment": str(row[4]).strip() if len(row) > 4 else "月付",
+                "rent_start": str(row[2]).strip() if len(row) > 2 else "",
+                "rent_end": str(row[3]).strip() if len(row) > 3 else ""
+            }
             today_due.append(info)
             continue
-        # 无/空白 → 退租日=今天
+
+        # 3. 无、空白或其他 → 看交租日是否 <= 今天
+        move = str(row[3]).strip() if len(row) > 3 else ""
         d = parse_day(move)
-        if d is not None and d == today:
+        if d is not None and d <= today:
+            info = {
+                "room": room,
+                "rent": str(row[7]).strip() if len(row) > 7 else "",
+                "payment": str(row[4]).strip() if len(row) > 4 else "月付",
+                "rent_start": str(row[2]).strip() if len(row) > 2 else "",
+                "rent_end": move
+            }
             today_due.append(info)
 
     return today_due
