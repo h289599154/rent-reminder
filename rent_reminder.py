@@ -97,17 +97,25 @@ def get_sheet_data(book_id, sheet_id, range_str):
                 t = cv.get("time", {})
                 y, m, d = t.get("year", ""), t.get("month", ""), t.get("day", "")
                 cells.append(f"{y}-{str(m).zfill(2)}-{str(d).zfill(2)}" if y and m and d else "")
+            elif v.get("dataType") == "SELECT":
+                # 处理下拉菜单控件
+                sel = cv.get("select", {})
+                options = sel.get("options", [])
+                selected_values = sel.get("value", [])
+                selected_texts = []
+                for opt in options:
+                    if opt.get("id") in selected_values:
+                        selected_texts.append(opt.get("text", ""))
+                cells.append(",".join(selected_texts))
             else:
                 cells.append(str(cv.get("text", "") or cv.get("number", "")))
         result.append(cells)
     return result
 
 def clean_text(s):
-    """强力清洗：去除所有不可见字符、全角转半角"""
     if not s: return ""
     s = str(s).strip()
-    s = unicodedata.normalize('NFKC', s)  # 全角转半角
-    # 去除常见不可见字符
+    s = unicodedata.normalize('NFKC', s)
     for ch in ['\u200b', '\u200c', '\u200d', '\ufeff', '\n', '\r', '\t', ' ']:
         s = s.replace(ch, '')
     return s
@@ -136,7 +144,7 @@ def check_sheet(doc):
             "rent_end": move
         }
 
-        # 打印调试
+        # 调试打印
         if room in ("206", "509"):
             print(f"调试: {doc['name']}-{room} | G列原始='{raw_status}' | 清洗后='{status}' | D列={move}")
 
