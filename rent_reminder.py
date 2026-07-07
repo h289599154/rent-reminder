@@ -20,18 +20,16 @@ DOCS = [
         "range": "A1:H80",
         "skip_rows": [11, 22, 33, 44, 55, 66],
         "push_to": ["owner", "friend_b"],
-        "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"},
-        "summary": {"row": 3, "col": 3}  # C3 标签，D3 房间号
+        "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"}
     },
     {
         "name": "彩虹",
         "book_id": "300000000$NowDLTtMyFxt",
         "sheet_id": "aopwxm",
-        "range": "A1:N50",
+        "range": "A1:H50",
         "skip_rows": [15, 25, 35],
         "push_to": ["owner"],
-        "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"},
-        "summary": {"row": 3, "col": 12}  # L3 标签，N3 房间号（L是第12列，N是第14列）
+        "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"}
     },
     {
         "name": "乐乐",
@@ -40,8 +38,7 @@ DOCS = [
         "range": "A1:H200",
         "skip_rows": [16, 27, 38, 49],
         "push_to": ["friend_c"],
-        "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"},
-        "summary": {"row": 3, "col": 3}
+        "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
     },
     {
         "name": "狮大",
@@ -50,18 +47,16 @@ DOCS = [
         "range": "A1:H150",
         "skip_rows": [11, 18, 25, 32, 39],
         "push_to": ["friend_c"],
-        "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"},
-        "summary": {"row": 3, "col": 3}
+        "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
     },
     {
         "name": "骆家2栋",
         "book_id": "300000000$NaIOsoNOmmry",
         "sheet_id": "BB08J2",
-        "range": "A1:M200",
+        "range": "A1:H200",
         "skip_rows": [12, 19, 26],
         "push_to": ["friend_c"],
-        "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"},
-        "summary": {"row": 2, "col": 11}  # K2 标签，M2 房间号（K是第11列，M是第13列）
+        "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
     }
 ]
 
@@ -70,6 +65,16 @@ TOKEN_MAP = {
     "friend_b": FRIEND_B_TOKEN,
     "friend_c": FRIEND_C_TOKEN
 }
+
+def get_today_day():
+    return datetime.now(TZ).day
+
+def parse_day(cell):
+    if not cell: return None
+    cell = str(cell).strip()
+    if "-" in cell: return int(cell.split("-")[-1])
+    if "/" in cell: return int(cell.split("/")[-1])
+    return None
 
 def get_sheet_data(book_id, sheet_id, range_str):
     url = f"https://docs.qq.com/openapi/spreadsheet/v3/files/{book_id}/{sheet_id}/{range_str}"
@@ -97,41 +102,42 @@ def get_sheet_data(book_id, sheet_id, range_str):
         result.append(cells)
     return result
 
-def get_summary_rooms(rows, row_num, col_num):
-    """
-    读取指定位置的房间号列表。
-    row_num: 标签所在行（1-based）
-    col_num: 标签所在列（1-based），房间号在 col_num+1 列
-    """
-    if row_num <= len(rows) and col_num < len(rows[row_num - 1]):
-        room_str = str(rows[row_num - 1][col_num + 1]).strip() if col_num + 1 < len(rows[row_num - 1]) else ""
-        if room_str:
-            return [r.strip() for r in room_str.replace("、", ",").split(",") if r.strip()]
-    return []
-
-def get_room_info(rows, room_number):
-    for row in rows:
-        if not row: continue
-        if str(row[0]).strip() == room_number:
-            return {
-                "room": room_number,
-                "rent": str(row[7]).strip() if len(row) > 7 else "",
-                "payment": str(row[4]).strip() if len(row) > 4 else "月付",
-                "rent_start": str(row[2]).strip() if len(row) > 2 else "",
-                "rent_end": str(row[3]).strip() if len(row) > 3 else ""
-            }
-    return None
-
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
-    room_numbers = get_summary_rooms(rows, doc["summary"]["row"], doc["summary"]["col"])
-    due_list = []
-    for num in room_numbers:
-        info = get_room_info(rows, num)
-        if info:
-            due_list.append(info)
-    print(f"  [{doc['name']}] 读取到 {len(room_numbers)} 个房间号 → {len(due_list)}间有详细信息")
-    return due_list
+    today = get_today_day()
+    today_due = []
+    skip = set(doc["skip_rows"])
+    for i, row in enumerate(rows):
+        rn = i + 1
+        if rn in skip: continue
+        if len(row) < 8: continue
+        room = str(row[0]).strip() if row[0] else ""
+        if not room: continue
+
+        status = str(row[6]).strip() if len(row) > 6 else ""
+        move = str(row[3]).strip() if len(row) > 3 else ""
+
+        info = {
+            "room": room,
+            "rent": str(row[7]).strip() if len(row) > 7 else "",
+            "payment": str(row[4]).strip() if len(row) > 4 else "月付",
+            "rent_start": str(row[2]).strip() if len(row) > 2 else "",
+            "rent_end": move
+        }
+
+        # 付 → 跳过
+        if status == "付":
+            continue
+        # 欠 → 强制提醒
+        if status == "欠":
+            today_due.append(info)
+            continue
+        # 无 / 空白 → 退租日 = 今天才提醒
+        d = parse_day(move)
+        if d is not None and d == today:
+            today_due.append(info)
+
+    return today_due
 
 def check_token_expiry():
     try:
@@ -186,19 +192,25 @@ def main():
                     if card:
                         cards.append(card)
                         total_due += len(due)
-            if not cards:
-                print(f"{target} 无交租房间，跳过")
-                continue
-
             now = datetime.now(TZ).strftime("%H:%M")
-            title = f"🏠 收租提醒 | {total_due}间需交租 · {now}"
             today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 需交租提醒 · {today_str}</h2>'
-            html += "".join(cards)
-            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间需交租</div>'
-            html += f"<!-- {random.randint(10000, 99999)} -->"
-            send_pushplus(token, title, html)
-            print(f"已推送 {target}: {title}")
+            rand = random.randint(10000, 99999)
+            if cards:
+                title = f"🏠 收租提醒 | {total_due}间需交租 · {now}"
+                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 需交租提醒 · {today_str}</h2>'
+                html += "".join(cards)
+                html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间需交租</div>'
+                html += f"<!-- {rand} -->"
+                send_pushplus(token, title, html)
+                print(f"已推送 {target}: {title}")
+            else:
+                if target == "owner":
+                    title = f"🏠 收租提醒 | 今日无交租 · {now}"
+                    html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无交租 · {today_str}</h2><p>所有房间已付清或无到期。</p><!-- {rand} -->'
+                    send_pushplus(token, title, html)
+                    print(f"已推送 owner: 今日无交租")
+                else:
+                    print(f"{target} 无交租房间，跳过")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
