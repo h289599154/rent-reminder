@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, json, base64, requests, traceback, random
+import os, sys, json, base64, requests, traceback, random, unicodedata
 from datetime import datetime, timezone, timedelta
 
 CLIENT_ID = os.environ["TENCENT_CLIENT_ID"]
@@ -102,6 +102,16 @@ def get_sheet_data(book_id, sheet_id, range_str):
         result.append(cells)
     return result
 
+def clean_text(s):
+    """强力清洗：去除所有不可见字符、全角转半角"""
+    if not s: return ""
+    s = str(s).strip()
+    s = unicodedata.normalize('NFKC', s)  # 全角转半角
+    # 去除常见不可见字符
+    for ch in ['\u200b', '\u200c', '\u200d', '\ufeff', '\n', '\r', '\t', ' ']:
+        s = s.replace(ch, '')
+    return s
+
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today_day()
@@ -114,7 +124,8 @@ def check_sheet(doc):
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
 
-        status = str(row[6]).strip() if len(row) > 6 else ""
+        raw_status = str(row[6]) if len(row) > 6 else ""
+        status = clean_text(raw_status)
         move = str(row[3]).strip() if len(row) > 3 else ""
 
         info = {
@@ -125,6 +136,10 @@ def check_sheet(doc):
             "rent_end": move
         }
 
+        # 打印调试
+        if room in ("206", "509"):
+            print(f"调试: {doc['name']}-{room} | G列原始='{raw_status}' | 清洗后='{status}' | D列={move}")
+
         # 付 → 跳过
         if status == "付":
             continue
@@ -132,7 +147,7 @@ def check_sheet(doc):
         if status == "欠":
             today_due.append(info)
             continue
-        # 无 / 空白 → 退租日 = 今天才提醒
+        # 无/空白 → 退租日=今天
         d = parse_day(move)
         if d is not None and d == today:
             today_due.append(info)
