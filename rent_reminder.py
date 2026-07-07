@@ -66,6 +66,8 @@ TOKEN_MAP = {
     "friend_c": FRIEND_C_TOKEN
 }
 
+TOKEN_NAMES = {"owner": "房东", "friend_b": "朋友B", "friend_c": "朋友C"}
+
 def get_today_day():
     return datetime.now(TZ).day
 
@@ -98,7 +100,6 @@ def get_sheet_data(book_id, sheet_id, range_str):
                 y, m, d = t.get("year", ""), t.get("month", ""), t.get("day", "")
                 cells.append(f"{y}-{str(m).zfill(2)}-{str(d).zfill(2)}" if y and m and d else "")
             elif v.get("dataType") == "SELECT":
-                # 下拉菜单：从 select 字段提取文本
                 sel = cv.get("select", {})
                 options = sel.get("options", [])
                 selected_values = sel.get("value", [])
@@ -132,28 +133,25 @@ def check_sheet(doc):
         room = str(row[0]).strip() if row[0] else ""
         if not room: continue
 
-        # G列状态（下拉菜单）
         raw_status = str(row[6]) if len(row) > 6 else ""
         status = clean_text(raw_status)
+        move = str(row[3]).strip() if len(row) > 3 else ""
 
-        # 1. 付 → 跳过
+        # 付 → 跳过
         if status == "付":
             continue
-
-        # 2. 欠 → 强制提醒（不管交租日）
+        # 欠 → 强制提醒
         if status == "欠":
             info = {
                 "room": room,
                 "rent": str(row[7]).strip() if len(row) > 7 else "",
                 "payment": str(row[4]).strip() if len(row) > 4 else "月付",
                 "rent_start": str(row[2]).strip() if len(row) > 2 else "",
-                "rent_end": str(row[3]).strip() if len(row) > 3 else ""
+                "rent_end": move
             }
             today_due.append(info)
             continue
-
-        # 3. 无、空白或其他 → 看交租日是否 <= 今天
-        move = str(row[3]).strip() if len(row) > 3 else ""
+        # 无/空白/其他 → 交租日 <= 今天
         d = parse_day(move)
         if d is not None and d <= today:
             info = {
@@ -200,45 +198,62 @@ def send_pushplus(token, title, content):
     }, timeout=10)
     print(f"PushPlus 返回: {resp.json()}")
 
+def get_target():
+    """读取 GitHub Actions 传入的 target 参数"""
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path:
+        try:
+            with open(event_path, "r") as f:
+                event = json.load(f)
+            return event.get("inputs", {}).get("target", "owner")
+        except:
+            pass
+    return "owner"
+
 def main():
     try:
+        target = get_target()
+        print(f"目标推送对象: {target} ({TOKEN_NAMES.get(target, '未知')})")
+
         all_data = {}
         for doc in DOCS:
             due_list = check_sheet(doc)
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需交租{len(due_list)}间")
 
-        for target, token in TOKEN_MAP.items():
-            if not token: continue
-            cards = []
-            total_due = 0
-            for doc in DOCS:
-                if target not in doc["push_to"]: continue
-                due = all_data.get(doc["name"], [])
-                if due:
-                    card = doc_card(doc, due)
-                    if card:
-                        cards.append(card)
-                        total_due += len(due)
-            now = datetime.now(TZ).strftime("%H:%M")
-            today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-            rand = random.randint(10000, 99999)
-            if cards:
-                title = f"🏠 收租提醒 | {total_due}间需交租 · {now}"
-                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 需交租提醒 · {today_str}</h2>'
-                html += "".join(cards)
-                html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间需交租</div>'
-                html += f"<!-- {rand} -->"
-                send_pushplus(token, title, html)
-                print(f"已推送 {target}: {title}")
-            else:
-                if target == "owner":
-                    title = f"🏠 收租提醒 | 今日无交租 · {now}"
-                    html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无交租 · {today_str}</h2><p>所有房间已付清或无到期。</p><!-- {rand} -->'
-                    send_pushplus(token, title, html)
-                    print(f"已推送 owner: 今日无交租")
-                else:
-                    print(f"{target} 无交租房间，跳过")
+        token = TOKEN_MAP.get(target)
+        if not token:
+            print(f"未找到 {target} 的 token")
+            sys.exit(1)
+
+        cards = []
+        total_due = 0
+        for doc in DOCS:
+            if target not in doc["push_to"]:
+                continue
+            due = all_data.get(doc["name"], [])
+            if due:
+                card = doc_card(doc, due)
+                if card:
+                    cards.append(card)
+                    total_due += len(due)
+
+        now = datetime.now(TZ).strftime("%H:%M")
+        today_str = datetime.now(TZ).strftime("%Y-%m-%d")
+        rand = random.randint(10000, 99999)
+        if cards:
+            title = f"🏠 收租提醒 | {total_due}间需交租 · {now}"
+            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 需交租提醒 · {today_str}</h2>'
+            html += "".join(cards)
+            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间需交租</div>'
+            html += f"<!-- {rand} -->"
+            send_pushplus(token, title, html)
+            print(f"已推送 {target}: {title}")
+        else:
+            title = f"🏠 收租提醒 | 今日无交租 · {now}"
+            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无交租 · {today_str}</h2><p>所有房间已付清或无到期。</p><!-- {rand} -->'
+            send_pushplus(token, title, html)
+            print(f"已推送 {target}: 今日无交租")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
