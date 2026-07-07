@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      target:
+        description: '推送给谁 (owner/friend_b/friend_c)'
+        required: false
+        default: 'owner'
 
 env:
   TZ: Asia/Shanghai
