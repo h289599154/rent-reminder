@@ -161,7 +161,7 @@ def check_sheet(doc):
             "payment": str(row[4]).strip() if len(row) > 4 else "月付",
             "rent_start": str(row[2]).strip() if len(row) > 2 else "",
             "rent_end": move,
-            "lease_remain": str(row[1]).strip() if len(row) > 1 else "",  # B列
+            "lease_remain": str(row[1]).strip() if len(row) > 1 else "",
             "status": status
         }
 
@@ -209,10 +209,9 @@ def room_html(room):
 
     lease = f"{start} ~ {end}" if start and end else "未知租期"
 
-    # 网杂费空白时用 &nbsp; 占位，保持对齐
-    net_display = net if net and net != "0" else "&nbsp;"
-    # 水费如果有值则显示，否则也占位（可选，这次只改网杂费，水费保留显示0或空，但为统一可同样处理，暂不强制）
-    # water_display = water if water and water != "0" else "&nbsp;"
+    # 网杂费空白时用空格占位（&nbsp;），保持对齐
+    net_display = net if (net and net != "0") else "&nbsp;"
+    water_display = water if (water and water != "0") else "&nbsp;"
 
     # 支付方式（去掉交租日）
     pay_info = pay
@@ -224,8 +223,13 @@ def room_html(room):
         if nums:
             months_text = f" · 剩余{nums[0]}个月"
 
-    # 第一行：房间号 + 标签 + 租金 + 水费/网杂费 + 共支付（红色加粗）
-    line1 = f'<b style="font-size:14px;color:#333">{name}</b> {tag}<span style="font-size:13px;color:#333"> ¥{rent}/月</span> <span style="font-size:11px;color:#666">水费{water} 网杂费{net_display}</span> <span style="font-size:13px;color:#D4380D;font-weight:bold">共支付：¥{total}</span>'
+    # 第一行：房间号 + 标签 + 月租 + 需支付（红色） + （水费XX 网杂费XX）
+    line1 = (
+        f'<b style="font-size:14px;color:#333">{name}</b> {tag}'
+        f'<span style="font-size:13px;color:#333"> ¥{rent}/月</span> '
+        f'<span style="font-size:13px;color:#D4380D;font-weight:bold">需支付：¥{total}</span> '
+        f'<span style="font-size:11px;color:#666">（水费{water_display} 网杂费{net_display}）</span>'
+    )
     # 第二行：租期 · 支付方式 · 剩余月数
     line2 = f'<span style="font-size:11px;color:#999">{lease} · {pay_info}{months_text}</span>'
 
