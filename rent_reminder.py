@@ -17,7 +17,7 @@ DOCS = [
         "name": "悦居",
         "book_id": "300000000$NGUIfHYzcqNf",
         "sheet_id": "aopwxm",
-        "range": "A1:L80",
+        "range": "A1:L71",
         "skip_rows": [11, 22, 33, 44, 55, 66],
         "push_to": ["owner", "friend_b"],
         "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"}
@@ -26,7 +26,7 @@ DOCS = [
         "name": "彩虹",
         "book_id": "300000000$NowDLTtMyFxt",
         "sheet_id": "aopwxm",
-        "range": "A1:L50",
+        "range": "A1:L41",
         "skip_rows": [15, 25, 35],
         "push_to": ["owner"],
         "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"}
@@ -35,7 +35,7 @@ DOCS = [
         "name": "乐乐",
         "book_id": "300000000$NEkgavzHZlWi",
         "sheet_id": "aopwxm",
-        "range": "A1:L200",
+        "range": "A1:L54",
         "skip_rows": [16, 27, 38, 49],
         "push_to": ["friend_c"],
         "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
@@ -44,7 +44,7 @@ DOCS = [
         "name": "狮大",
         "book_id": "300000000$NVGckzvbFein",
         "sheet_id": "BB08J2",
-        "range": "A1:L150",
+        "range": "A1:L42",
         "skip_rows": [11, 18, 25, 32, 39],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
@@ -53,7 +53,7 @@ DOCS = [
         "name": "骆家2栋",
         "book_id": "300000000$NaIOsoNOmmry",
         "sheet_id": "BB08J2",
-        "range": "A1:L200",
+        "range": "A1:L32",
         "skip_rows": [12, 19, 26],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
@@ -165,15 +165,19 @@ def check_sheet(doc):
             "status": status
         }
 
+        # 付 → 跳过
         if status == "付":
             continue
+        # 欠 → 强制提醒
         if status == "欠":
             today_due.append(info)
             continue
+        # 退 → 退租日到了就提醒
         if status == "退":
             if d is not None and d <= today:
                 today_due.append(info)
             continue
+        # 无、空白、其他 → 退租日 <= 今天
         if d is not None and d <= today:
             today_due.append(info)
 
@@ -208,29 +212,22 @@ def room_html(room):
         tag = ""
 
     lease = f"{start} ~ {end}" if start and end else "未知租期"
-
-    # 网杂费空白时用空格占位（&nbsp;），保持对齐
     net_display = net if (net and net != "0") else "&nbsp;"
     water_display = water if (water and water != "0") else "&nbsp;"
-
-    # 支付方式（去掉交租日）
     pay_info = pay
 
-    # 租期剩余：提取B列中的数字，显示“剩余X个月”
     months_text = ""
     if lease_remain:
         nums = re.findall(r'\d+', lease_remain)
         if nums:
             months_text = f" · 剩余{nums[0]}个月"
 
-    # 第一行：房间号 + 标签 + 月租 + 需支付（红色） + （水费XX 网杂费XX）
     line1 = (
         f'<b style="font-size:14px;color:#333">{name}</b> {tag}'
         f'<span style="font-size:13px;color:#333"> ¥{rent}/月</span> '
         f'<span style="font-size:13px;color:#D4380D;font-weight:bold">需支付：¥{total}</span> '
         f'<span style="font-size:11px;color:#666">（水费{water_display} 网杂费{net_display}）</span>'
     )
-    # 第二行：租期 · 支付方式 · 剩余月数
     line2 = f'<span style="font-size:11px;color:#999">{lease} · {pay_info}{months_text}</span>'
 
     return f'<div style="margin:0;line-height:1.5">{line1}<br>{line2}</div>'
