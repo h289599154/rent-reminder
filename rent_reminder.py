@@ -12,12 +12,24 @@ FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 
 TZ = timezone(timedelta(hours=8))
 
+# 固定列索引：A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9, K=10, L=11
+COL_ROOM = 0      # A列：房间号
+COL_REMAIN = 1    # B列：租期剩余
+COL_START = 2     # C列：起租日
+COL_END = 3       # D列：退租日
+COL_PAYMENT = 4   # E列：支付方式
+COL_DUE_DAY = 5   # F列：交租日（暂未使用）
+COL_STATUS = 6    # G列：状态
+COL_RENT = 7      # H列：月租
+COL_WATER = 9     # J列：水费
+COL_NET = 11      # L列：网杂费
+
 DOCS = [
     {
         "name": "悦居",
         "book_id": "300000000$NGUIfHYzcqNf",
         "sheet_id": "aopwxm",
-        "range": "A1:L80",
+        "range": "A1:L71",
         "title_rows": [11, 22, 33, 44, 55, 66],
         "push_to": ["owner", "friend_b"],
         "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"}
@@ -26,7 +38,7 @@ DOCS = [
         "name": "彩虹",
         "book_id": "300000000$NowDLTtMyFxt",
         "sheet_id": "aopwxm",
-        "range": "A1:L50",
+        "range": "A1:L41",
         "title_rows": [15, 25, 35],
         "push_to": ["owner"],
         "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"}
@@ -35,7 +47,7 @@ DOCS = [
         "name": "乐乐",
         "book_id": "300000000$NEkgavzHZlWi",
         "sheet_id": "aopwxm",
-        "range": "A1:L200",
+        "range": "A1:L54",
         "title_rows": [16, 27, 38, 49],
         "push_to": ["friend_c"],
         "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
@@ -44,7 +56,7 @@ DOCS = [
         "name": "狮大",
         "book_id": "300000000$NVGckzvbFein",
         "sheet_id": "BB08J2",
-        "range": "A1:L150",
+        "range": "A1:L42",
         "title_rows": [11, 18, 25, 32, 39],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
@@ -53,7 +65,7 @@ DOCS = [
         "name": "骆家2栋",
         "book_id": "300000000$NaIOsoNOmmry",
         "sheet_id": "BB08J2",
-        "range": "A1:L200",
+        "range": "A1:L32",
         "title_rows": [12, 19, 26],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
@@ -133,35 +145,8 @@ def safe_float(s):
     except:
         return 0.0
 
-def find_column(headers, keywords):
-    for kw in keywords:
-        for idx, h in enumerate(headers):
-            if kw in clean_text(h):
-                return idx
-    return -1
-
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
-    if len(rows) < 6:
-        return []
-
-    header_row = rows[4] if len(rows) > 4 else rows[0]
-    headers = [str(c).strip() for c in header_row]
-
-    col_room = find_column(headers, ["房号", "房间", "房"])
-    col_remain = find_column(headers, ["剩余", "租期"])
-    col_start = find_column(headers, ["起租", "起始"])
-    col_end = find_column(headers, ["退租", "到期"])
-    col_pay = find_column(headers, ["支付", "付款"])
-    col_status = find_column(headers, ["状态", "标记"])
-    col_rent = find_column(headers, ["月租", "租金"])
-    col_water = find_column(headers, ["水费", "水"])
-    col_net = find_column(headers, ["网费", "网杂", "杂费"])
-
-    if -1 in (col_room, col_status, col_end, col_rent):
-        print(f"  [{doc['name']}] 未识别到必要列")
-        return []
-
     today = get_today()
     today_day = today.day
     first_day = is_first_day_of_month()
@@ -171,25 +156,25 @@ def check_sheet(doc):
     for i, row in enumerate(rows):
         rn = i + 1
         if rn in title_rows: continue
-        if max(col_room, col_status, col_end, col_rent) >= len(row): continue
-        room = str(row[col_room]).strip() if col_room >= 0 else ""
+        if len(row) < 12: continue   # 至少到 L 列
+        room = str(row[COL_ROOM]).strip() if len(row) > COL_ROOM else ""
         if not room: continue
-        if not any(c.isdigit() for c in room): continue
+        if not any(c.isdigit() for c in room): continue  # 跳过纯中文行
 
-        raw_status = str(row[col_status]) if col_status >= 0 else ""
+        raw_status = str(row[COL_STATUS]) if len(row) > COL_STATUS else ""
         status = clean_text(raw_status)
-        move = str(row[col_end]).strip() if col_end >= 0 else ""
+        move = str(row[COL_END]).strip() if len(row) > COL_END else ""
         d = parse_day(move)
 
         if first_day and status in ("付", "无"):
             status = ""
 
-        rent_str = str(row[col_rent]).strip() if col_rent >= 0 else "0"
-        water_str = str(row[col_water]).strip() if col_water >= 0 and col_water < len(row) else "0"
-        net_str = str(row[col_net]).strip() if col_net >= 0 and col_net < len(row) else "0"
-        payment_str = str(row[col_pay]).strip() if col_pay >= 0 and col_pay < len(row) else "月付"
-        start_str = str(row[col_start]).strip() if col_start >= 0 and col_start < len(row) else ""
-        remain_str = str(row[col_remain]).strip() if col_remain >= 0 and col_remain < len(row) else ""
+        rent_str = str(row[COL_RENT]).strip() if len(row) > COL_RENT else "0"
+        water_str = str(row[COL_WATER]).strip() if len(row) > COL_WATER else "0"
+        net_str = str(row[COL_NET]).strip() if len(row) > COL_NET else "0"
+        payment_str = str(row[COL_PAYMENT]).strip() if len(row) > COL_PAYMENT else "月付"
+        start_str = str(row[COL_START]).strip() if len(row) > COL_START else ""
+        remain_str = str(row[COL_REMAIN]).strip() if len(row) > COL_REMAIN else ""
 
         rent_val = safe_float(rent_str)
         water_val = safe_float(water_str)
@@ -295,10 +280,7 @@ def main():
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需处理{len(due_list)}间")
 
-        # 判断触发方式
         event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-
-        # 读取手动触发时的 target 参数
         target = None
         event_path = os.environ.get("GITHUB_EVENT_PATH", "")
         if event_path:
@@ -309,13 +291,11 @@ def main():
             except:
                 pass
 
-        # 决定推送给谁
         if event_name == "schedule":
             targets = ["owner", "friend_b", "friend_c"]
             print("定时任务：推送给 owner, friend_b, friend_c")
         elif target == "all":
             targets = ["owner"]
-            # 全部模式：临时把所有公寓的 push_to 加上 owner
             for doc in DOCS:
                 if "owner" not in doc["push_to"]:
                     doc["push_to"].append("owner")
@@ -365,13 +345,6 @@ def main():
                 html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
                 send_pushplus(token, title, html)
                 print(f"已推送 {t}: 今日无待处理")
-
-        # 恢复临时修改的 push_to（如果 all 模式改过）
-        if target == "all":
-            for doc in DOCS:
-                # 移除临时的 owner
-                if "owner" in doc["push_to"] and doc["name"] not in ["悦居", "彩虹"]:
-                    doc["push_to"].remove("owner")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
