@@ -17,8 +17,8 @@ DOCS = [
         "name": "悦居",
         "book_id": "300000000$NGUIfHYzcqNf",
         "sheet_id": "aopwxm",
-        "range": "A1:L71",
-        "skip_rows": [11, 22, 33, 44, 55, 66],
+        "range": "A1:L80",
+        "title_rows": [11, 22, 33, 44, 55, 66],
         "push_to": ["owner", "friend_b"],
         "color": {"bg": "#FFF7F0", "border": "#E8853D", "title": "#C5601A"}
     },
@@ -26,8 +26,8 @@ DOCS = [
         "name": "彩虹",
         "book_id": "300000000$NowDLTtMyFxt",
         "sheet_id": "aopwxm",
-        "range": "A1:L41",
-        "skip_rows": [15, 25, 35],
+        "range": "A1:L50",
+        "title_rows": [15, 25, 35],
         "push_to": ["owner"],
         "color": {"bg": "#F0F5FF", "border": "#3D8BE8", "title": "#1A5FC5"}
     },
@@ -35,8 +35,8 @@ DOCS = [
         "name": "乐乐",
         "book_id": "300000000$NEkgavzHZlWi",
         "sheet_id": "aopwxm",
-        "range": "A1:L54",
-        "skip_rows": [16, 27, 38, 49],
+        "range": "A1:L200",
+        "title_rows": [16, 27, 38, 49],
         "push_to": ["friend_c"],
         "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
     },
@@ -44,8 +44,8 @@ DOCS = [
         "name": "狮大",
         "book_id": "300000000$NVGckzvbFein",
         "sheet_id": "BB08J2",
-        "range": "A1:L42",
-        "skip_rows": [11, 18, 25, 32, 39],
+        "range": "A1:L150",
+        "title_rows": [11, 18, 25, 32, 39],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
     },
@@ -53,8 +53,8 @@ DOCS = [
         "name": "骆家2栋",
         "book_id": "300000000$NaIOsoNOmmry",
         "sheet_id": "BB08J2",
-        "range": "A1:L32",
-        "skip_rows": [12, 19, 26],
+        "range": "A1:L200",
+        "title_rows": [12, 19, 26],
         "push_to": ["friend_c"],
         "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
     }
@@ -68,8 +68,14 @@ TOKEN_MAP = {
 
 TOKEN_NAMES = {"owner": "房东", "friend_b": "朋友B", "friend_c": "朋友C", "all": "全部公寓"}
 
+def get_today():
+    return datetime.now(TZ)
+
 def get_today_day():
-    return datetime.now(TZ).day
+    return get_today().day
+
+def is_first_day_of_month():
+    return get_today().day == 1
 
 def parse_day(cell):
     if not cell: return None
@@ -127,26 +133,64 @@ def safe_float(s):
     except:
         return 0.0
 
+def find_column(headers, keywords):
+    for kw in keywords:
+        for idx, h in enumerate(headers):
+            if kw in clean_text(h):
+                return idx
+    return -1
+
 def check_sheet(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
-    today = get_today_day()
+    if len(rows) < 6:
+        return []
+
+    header_row = rows[4] if len(rows) > 4 else rows[0]
+    headers = [str(c).strip() for c in header_row]
+
+    col_room = find_column(headers, ["房号", "房间", "房"])
+    col_remain = find_column(headers, ["剩余", "租期"])
+    col_start = find_column(headers, ["起租", "起始"])
+    col_end = find_column(headers, ["退租", "到期"])
+    col_pay = find_column(headers, ["支付", "付款"])
+    col_status = find_column(headers, ["状态", "标记"])
+    col_rent = find_column(headers, ["月租", "租金"])
+    col_water = find_column(headers, ["水费", "水"])
+    col_net = find_column(headers, ["网费", "网杂", "杂费"])
+
+    if -1 in (col_room, col_status, col_end, col_rent):
+        print(f"  [{doc['name']}] 未识别到必要列")
+        return []
+
+    today = get_today()
+    today_day = today.day
+    first_day = is_first_day_of_month()
+    title_rows = set(doc["title_rows"])
     today_due = []
-    skip = set(doc["skip_rows"])
+
     for i, row in enumerate(rows):
         rn = i + 1
-        if rn in skip: continue
-        if len(row) < 12: continue
-        room = str(row[0]).strip() if row[0] else ""
+        if rn in title_rows: continue
+        if max(col_room, col_status, col_end, col_rent) >= len(row): continue
+        room = str(row[col_room]).strip() if col_room >= 0 else ""
         if not room: continue
+        if not any(c.isdigit() for c in room): continue
 
-        raw_status = str(row[6]) if len(row) > 6 else ""
+        raw_status = str(row[col_status]) if col_status >= 0 else ""
         status = clean_text(raw_status)
-        move = str(row[3]).strip() if len(row) > 3 else ""
+        move = str(row[col_end]).strip() if col_end >= 0 else ""
         d = parse_day(move)
 
-        rent_str = str(row[7]).strip() if len(row) > 7 else "0"
-        water_str = str(row[9]).strip() if len(row) > 9 else "0"
-        net_str = str(row[11]).strip() if len(row) > 11 else "0"
+        if first_day and status in ("付", "无"):
+            status = ""
+
+        rent_str = str(row[col_rent]).strip() if col_rent >= 0 else "0"
+        water_str = str(row[col_water]).strip() if col_water >= 0 and col_water < len(row) else "0"
+        net_str = str(row[col_net]).strip() if col_net >= 0 and col_net < len(row) else "0"
+        payment_str = str(row[col_pay]).strip() if col_pay >= 0 and col_pay < len(row) else "月付"
+        start_str = str(row[col_start]).strip() if col_start >= 0 and col_start < len(row) else ""
+        remain_str = str(row[col_remain]).strip() if col_remain >= 0 and col_remain < len(row) else ""
+
         rent_val = safe_float(rent_str)
         water_val = safe_float(water_str)
         net_val = safe_float(net_str)
@@ -158,27 +202,23 @@ def check_sheet(doc):
             "water": water_str,
             "net": net_str,
             "total": f"{total_payment:.0f}" if total_payment == int(total_payment) else f"{total_payment:.2f}",
-            "payment": str(row[4]).strip() if len(row) > 4 else "月付",
-            "rent_start": str(row[2]).strip() if len(row) > 2 else "",
+            "payment": payment_str or "月付",
+            "rent_start": start_str,
             "rent_end": move,
-            "lease_remain": str(row[1]).strip() if len(row) > 1 else "",
+            "lease_remain": remain_str,
             "status": status
         }
 
-        # 付 → 跳过
         if status == "付":
             continue
-        # 欠 → 强制提醒
         if status == "欠":
             today_due.append(info)
             continue
-        # 退 → 退租日到了就提醒
         if status == "退":
-            if d is not None and d <= today:
+            if d is not None and d <= today_day:
                 today_due.append(info)
             continue
-        # 无、空白、其他 → 退租日 <= 今天
-        if d is not None and d <= today:
+        if d is not None and d <= today_day:
             today_due.append(info)
 
     return today_due
@@ -258,64 +298,71 @@ def get_target():
             pass
     return "owner"
 
+def is_schedule_event():
+    return os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+
 def main():
     try:
-        target = get_target()
-        print(f"目标推送对象: {target} ({TOKEN_NAMES.get(target, '未知')})")
-
         all_data = {}
         for doc in DOCS:
             due_list = check_sheet(doc)
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需处理{len(due_list)}间")
 
-        if target == "all":
-            token = PUSHPLUS_TOKEN
-            doc_filter = None
+        if is_schedule_event():
+            # 定时任务：推送给所有人
+            targets = ["owner", "friend_b", "friend_c"]
+            print("定时任务：推送给所有目标")
         else:
+            target = get_target()
+            if target == "all":
+                targets = ["owner"]
+            else:
+                targets = [target]
+
+        for target in targets:
             token = TOKEN_MAP.get(target)
-            doc_filter = target
             if not token:
                 print(f"未找到 {target} 的 token")
-                sys.exit(1)
-
-        cards = []
-        total_due = 0
-        for doc in DOCS:
-            if doc_filter is not None and doc_filter not in doc["push_to"]:
                 continue
-            due = all_data.get(doc["name"], [])
-            if due:
-                card = doc_card(doc, due)
-                if card:
-                    cards.append(card)
-                    total_due += len(due)
 
-        now = datetime.now(TZ).strftime("%H:%M")
-        today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-        rand = random.randint(10000, 99999)
-        if cards:
-            owe_count = sum(1 for doc in DOCS if (doc_filter is None or doc_filter in doc["push_to"]) for r in all_data.get(doc["name"], []) if r.get("status") == "欠")
-            quit_count = sum(1 for doc in DOCS if (doc_filter is None or doc_filter in doc["push_to"]) for r in all_data.get(doc["name"], []) if r.get("status") == "退")
-            normal_count = total_due - owe_count - quit_count
+            cards = []
+            total_due = 0
+            for doc in DOCS:
+                if target not in doc["push_to"]:
+                    continue
+                due = all_data.get(doc["name"], [])
+                if due:
+                    card = doc_card(doc, due)
+                    if card:
+                        cards.append(card)
+                        total_due += len(due)
 
-            title_parts = []
-            if owe_count: title_parts.append(f"欠租{owe_count}间")
-            if quit_count: title_parts.append(f"退租{quit_count}间")
-            if normal_count: title_parts.append(f"交租{normal_count}间")
-            title = f"🏠 收租提醒 | {'·'.join(title_parts)} | {total_due}间待处理 · {now}"
+            now = datetime.now(TZ).strftime("%H:%M")
+            today_str = datetime.now(TZ).strftime("%Y-%m-%d")
+            rand = random.randint(10000, 99999)
+            if cards:
+                owe_count = sum(1 for doc in DOCS if target in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "欠")
+                quit_count = sum(1 for doc in DOCS if target in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "退")
+                normal_count = total_due - owe_count - quit_count
 
-            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租/退租提醒 · {today_str}</h2>'
-            html += "".join(cards)
-            html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间待处理</div>'
-            html += f"<!-- {rand} -->"
-            send_pushplus(token, title, html)
-            print(f"已推送 {target}: {title}")
-        else:
-            title = f"🏠 收租提醒 | 今日无待处理 · {now}"
-            html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
-            send_pushplus(token, title, html)
-            print(f"已推送 {target}: 今日无待处理")
+                title_parts = []
+                if owe_count: title_parts.append(f"欠租{owe_count}间")
+                if quit_count: title_parts.append(f"退租{quit_count}间")
+                if normal_count: title_parts.append(f"交租{normal_count}间")
+                title = f"🏠 收租提醒 | {'·'.join(title_parts)} | {total_due}间待处理 · {now}"
+
+                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租/退租提醒 · {today_str}</h2>'
+                html += "".join(cards)
+                html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间待处理</div>'
+                html += f"<!-- {rand} -->"
+                send_pushplus(token, title, html)
+                print(f"已推送 {target}: {title}")
+            else:
+                title = f"🏠 收租提醒 | 今日无待处理 · {now}"
+                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
+                send_pushplus(token, title, html)
+                print(f"已推送 {target}: 今日无待处理")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
