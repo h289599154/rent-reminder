@@ -287,20 +287,6 @@ def send_pushplus(token, title, content):
     }, timeout=10)
     print(f"PushPlus 返回: {resp.json()}")
 
-def get_target():
-    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
-    if event_path:
-        try:
-            with open(event_path, "r") as f:
-                event = json.load(f)
-            return event.get("inputs", {}).get("target", "owner")
-        except:
-            pass
-    return "owner"
-
-def is_schedule_event():
-    return os.environ.get("GITHUB_EVENT_NAME") == "schedule"
-
 def main():
     try:
         all_data = {}
@@ -309,27 +295,43 @@ def main():
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需处理{len(due_list)}间")
 
-        if is_schedule_event():
-            # 定时任务：推送给所有人
-            targets = ["owner", "friend_b", "friend_c"]
-            print("定时任务：推送给所有目标")
-        else:
-            target = get_target()
-            if target == "all":
-                targets = ["owner"]
-            else:
-                targets = [target]
+        # 判断触发方式
+        event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
-        for target in targets:
-            token = TOKEN_MAP.get(target)
+        # 读取手动触发时的 target 参数
+        target = None
+        event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+        if event_path:
+            try:
+                with open(event_path, "r") as f:
+                    event = json.load(f)
+                target = event.get("inputs", {}).get("target", None)
+            except:
+                pass
+
+        # 决定推送给谁
+        if event_name == "schedule":
+            targets = ["owner", "friend_b", "friend_c"]
+            print("定时任务：推送给 owner, friend_b, friend_c")
+        elif target == "all":
+            targets = ["owner"]
+            # 全部模式：临时把所有公寓的 push_to 加上 owner
+            for doc in DOCS:
+                if "owner" not in doc["push_to"]:
+                    doc["push_to"].append("owner")
+        else:
+            targets = [target] if target else ["owner"]
+
+        for t in targets:
+            token = TOKEN_MAP.get(t)
             if not token:
-                print(f"未找到 {target} 的 token")
+                print(f"未找到 {t} 的 token")
                 continue
 
             cards = []
             total_due = 0
             for doc in DOCS:
-                if target not in doc["push_to"]:
+                if t not in doc["push_to"]:
                     continue
                 due = all_data.get(doc["name"], [])
                 if due:
@@ -342,8 +344,8 @@ def main():
             today_str = datetime.now(TZ).strftime("%Y-%m-%d")
             rand = random.randint(10000, 99999)
             if cards:
-                owe_count = sum(1 for doc in DOCS if target in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "欠")
-                quit_count = sum(1 for doc in DOCS if target in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "退")
+                owe_count = sum(1 for doc in DOCS if t in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "欠")
+                quit_count = sum(1 for doc in DOCS if t in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "退")
                 normal_count = total_due - owe_count - quit_count
 
                 title_parts = []
@@ -357,12 +359,19 @@ def main():
                 html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间待处理</div>'
                 html += f"<!-- {rand} -->"
                 send_pushplus(token, title, html)
-                print(f"已推送 {target}: {title}")
+                print(f"已推送 {t}: {title}")
             else:
                 title = f"🏠 收租提醒 | 今日无待处理 · {now}"
                 html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
                 send_pushplus(token, title, html)
-                print(f"已推送 {target}: 今日无待处理")
+                print(f"已推送 {t}: 今日无待处理")
+
+        # 恢复临时修改的 push_to（如果 all 模式改过）
+        if target == "all":
+            for doc in DOCS:
+                # 移除临时的 owner
+                if "owner" in doc["push_to"] and doc["name"] not in ["悦居", "彩虹"]:
+                    doc["push_to"].remove("owner")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
