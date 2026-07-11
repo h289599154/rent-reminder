@@ -12,17 +12,17 @@ FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 
 TZ = timezone(timedelta(hours=8))
 
-# 固定列索引：A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9, K=10, L=11
-COL_ROOM = 0      # A列：房间号
-COL_REMAIN = 1    # B列：租期剩余
-COL_START = 2     # C列：起租日
-COL_END = 3       # D列：退租日
-COL_PAYMENT = 4   # E列：支付方式
-COL_DUE_DAY = 5   # F列：交租日（暂未使用）
-COL_STATUS = 6    # G列：状态
-COL_RENT = 7      # H列：月租
-COL_WATER = 9     # J列：水费
-COL_NET = 11      # L列：网杂费
+# 固定列索引
+COL_ROOM = 0
+COL_REMAIN = 1
+COL_START = 2
+COL_END = 3
+COL_PAYMENT = 4
+COL_DUE_DAY = 5
+COL_STATUS = 6
+COL_RENT = 7
+COL_WATER = 9
+COL_NET = 11
 
 DOCS = [
     {
@@ -156,10 +156,10 @@ def check_sheet(doc):
     for i, row in enumerate(rows):
         rn = i + 1
         if rn in title_rows: continue
-        if len(row) < 12: continue   # 至少到 L 列
+        if len(row) < 12: continue
         room = str(row[COL_ROOM]).strip() if len(row) > COL_ROOM else ""
         if not room: continue
-        if not any(c.isdigit() for c in room): continue  # 跳过纯中文行
+        if not any(c.isdigit() for c in room): continue
 
         raw_status = str(row[COL_STATUS]) if len(row) > COL_STATUS else ""
         status = clean_text(raw_status)
@@ -274,33 +274,22 @@ def send_pushplus(token, title, content):
 
 def main():
     try:
+        # ========== 强制只允许定时任务执行 ==========
+        event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+        if event_name != "schedule":
+            print(f"非定时任务触发 ({event_name})，已忽略。")
+            return
+        # ===========================================
+
         all_data = {}
         for doc in DOCS:
             due_list = check_sheet(doc)
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需处理{len(due_list)}间")
 
-        event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-        target = None
-        event_path = os.environ.get("GITHUB_EVENT_PATH", "")
-        if event_path:
-            try:
-                with open(event_path, "r") as f:
-                    event = json.load(f)
-                target = event.get("inputs", {}).get("target", None)
-            except:
-                pass
-
-        if event_name == "schedule":
-            targets = ["owner", "friend_b", "friend_c"]
-            print("定时任务：推送给 owner, friend_b, friend_c")
-        elif target == "all":
-            targets = ["owner"]
-            for doc in DOCS:
-                if "owner" not in doc["push_to"]:
-                    doc["push_to"].append("owner")
-        else:
-            targets = [target] if target else ["owner"]
+        # 定时任务固定推送给三人
+        targets = ["owner", "friend_b", "friend_c"]
+        print("定时任务：推送给 owner, friend_b, friend_c")
 
         for t in targets:
             token = TOKEN_MAP.get(t)
