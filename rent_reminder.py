@@ -274,22 +274,47 @@ def send_pushplus(token, title, content):
 
 def main():
     try:
-        # ========== 强制只允许定时任务执行 ==========
         event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-        if event_name != "schedule":
-            print(f"非定时任务触发 ({event_name})，已忽略。")
+
+        # 读取手动触发时的参数
+        target = None
+        passwd = None
+        event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+        if event_path:
+            try:
+                with open(event_path, "r") as f:
+                    event = json.load(f)
+                inputs = event.get("inputs", {})
+                target = inputs.get("target", None)
+                passwd = inputs.get("pass", None)
+            except:
+                pass
+
+        # 判断触发方式
+        if event_name == "schedule":
+            # 定时任务：推送给三人
+            targets = ["owner", "friend_b", "friend_c"]
+            print("定时任务：推送给 owner, friend_b, friend_c")
+        elif passwd == "9527":
+            # 手动触发且密码正确
+            if target == "all":
+                targets = ["owner"]
+                for doc in DOCS:
+                    if "owner" not in doc["push_to"]:
+                        doc["push_to"].append("owner")
+            else:
+                targets = [target] if target else ["owner"]
+            print(f"手动触发（密码正确）：推送给 {targets}")
+        else:
+            # 手动触发但密码错误或缺失 → 忽略
+            print(f"手动触发但密码错误 ({passwd})，已忽略")
             return
-        # ===========================================
 
         all_data = {}
         for doc in DOCS:
             due_list = check_sheet(doc)
             all_data[doc["name"]] = due_list
             print(f"{doc['name']}: 需处理{len(due_list)}间")
-
-        # 定时任务固定推送给三人
-        targets = ["owner", "friend_b", "friend_c"]
-        print("定时任务：推送给 owner, friend_b, friend_c")
 
         for t in targets:
             token = TOKEN_MAP.get(t)
@@ -334,6 +359,12 @@ def main():
                 html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
                 send_pushplus(token, title, html)
                 print(f"已推送 {t}: 今日无待处理")
+
+        # 恢复临时修改的 push_to
+        if target == "all":
+            for doc in DOCS:
+                if "owner" in doc["push_to"] and doc["name"] not in ["悦居", "彩虹"]:
+                    doc["push_to"].remove("owner")
 
         if check_token_expiry():
             send_pushplus(PUSHPLUS_TOKEN, "⚠️ Token即将过期",
