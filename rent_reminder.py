@@ -272,8 +272,6 @@ def send_pushplus(token, title, content):
 def main():
     try:
         event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-
-        # 读取手动触发参数（如果有）
         target = None
         event_path = os.environ.get("GITHUB_EVENT_PATH", "")
         if event_path:
@@ -284,7 +282,6 @@ def main():
             except:
                 pass
 
-        # 决定推送给谁
         if event_name == "schedule":
             targets = ["owner", "friend_b", "friend_c"]
             print("定时任务：推送给 owner, friend_b, friend_c")
@@ -351,7 +348,6 @@ def main():
                 send_pushplus(token, title, html)
                 print(f"已推送 {t}: 今日无待处理")
 
-        # 恢复临时修改的 push_to
         if target == "all":
             for doc in DOCS:
                 if "owner" in doc["push_to"] and doc["name"] not in ["悦居", "彩虹"]:
