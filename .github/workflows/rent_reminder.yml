@@ -1,17 +1,13 @@
 name: Rent Reminder Daily
 on:
   schedule:
-    - cron: '30 3 * * *'
+    - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       target:
         description: '推送给谁 (owner/friend_b/friend_c/all)'
         required: false
         default: 'owner'
-      pass:
-        description: '密码'
-        required: false
-        default: ''
 
 env:
   TZ: Asia/Shanghai
