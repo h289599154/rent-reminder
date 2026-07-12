@@ -12,7 +12,6 @@ FRIEND_C_TOKEN = os.environ["FRIEND_C_TOKEN"]
 
 TZ = timezone(timedelta(hours=8))
 
-# 固定列索引
 COL_ROOM = 0
 COL_REMAIN = 1
 COL_START = 2
@@ -77,8 +76,6 @@ TOKEN_MAP = {
     "friend_b": FRIEND_B_TOKEN,
     "friend_c": FRIEND_C_TOKEN
 }
-
-TOKEN_NAMES = {"owner": "房东", "friend_b": "朋友B", "friend_c": "朋友C", "all": "全部公寓"}
 
 def get_today():
     return datetime.now(TZ)
@@ -276,39 +273,33 @@ def main():
     try:
         event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
-        # 读取手动触发时的参数
+        # 读取手动触发参数（如果有）
         target = None
-        passwd = None
         event_path = os.environ.get("GITHUB_EVENT_PATH", "")
         if event_path:
             try:
                 with open(event_path, "r") as f:
                     event = json.load(f)
-                inputs = event.get("inputs", {})
-                target = inputs.get("target", None)
-                passwd = inputs.get("pass", None)
+                target = event.get("inputs", {}).get("target", None)
             except:
                 pass
 
-        # 判断触发方式
+        # 决定推送给谁
         if event_name == "schedule":
-            # 定时任务：推送给三人
             targets = ["owner", "friend_b", "friend_c"]
             print("定时任务：推送给 owner, friend_b, friend_c")
-        elif passwd == "9527":
-            # 手动触发且密码正确
-            if target == "all":
-                targets = ["owner"]
-                for doc in DOCS:
-                    if "owner" not in doc["push_to"]:
-                        doc["push_to"].append("owner")
-            else:
-                targets = [target] if target else ["owner"]
-            print(f"手动触发（密码正确）：推送给 {targets}")
+        elif target == "all":
+            targets = ["owner"]
+            for doc in DOCS:
+                if "owner" not in doc["push_to"]:
+                    doc["push_to"].append("owner")
+            print("手动触发（全部公寓）：推送给 owner")
+        elif target:
+            targets = [target]
+            print(f"手动触发：推送给 {target}")
         else:
-            # 手动触发但密码错误或缺失 → 忽略
-            print(f"手动触发但密码错误 ({passwd})，已忽略")
-            return
+            targets = ["owner"]
+            print("无参数，默认推送给 owner")
 
         all_data = {}
         for doc in DOCS:
