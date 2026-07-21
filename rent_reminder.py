@@ -17,7 +17,7 @@ COL_REMAIN = 1
 COL_START = 2
 COL_END = 3
 COL_PAYMENT = 4
-COL_DUE_DAY = 5
+COL_DUE_DAY = 5    # F列：交租日（朋友C专用）
 COL_STATUS = 6
 COL_RENT = 7
 COL_WATER = 9
@@ -49,7 +49,8 @@ DOCS = [
         "range": "A1:L54",
         "title_rows": [16, 27, 38, 49],
         "push_to": ["friend_c"],
-        "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"}
+        "color": {"bg": "#F5FFF0", "border": "#6DE83D", "title": "#3AC51A"},
+        "use_f_column": True
     },
     {
         "name": "狮大",
@@ -58,7 +59,8 @@ DOCS = [
         "range": "A1:L42",
         "title_rows": [11, 18, 25, 32, 39],
         "push_to": ["friend_c"],
-        "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"}
+        "color": {"bg": "#FFF5F0", "border": "#E8963D", "title": "#C5801A"},
+        "use_f_column": True
     },
     {
         "name": "骆家2栋",
@@ -67,7 +69,8 @@ DOCS = [
         "range": "A1:L32",
         "title_rows": [12, 19, 26],
         "push_to": ["friend_c"],
-        "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"}
+        "color": {"bg": "#FFF0F5", "border": "#E83D8B", "title": "#C51A6D"},
+        "use_f_column": True
     }
 ]
 
@@ -82,6 +85,9 @@ def get_today():
 
 def get_today_day():
     return get_today().day
+
+def get_today_month():
+    return get_today().month
 
 def is_first_day_of_month():
     return get_today().day == 1
@@ -142,7 +148,7 @@ def safe_float(s):
     except:
         return 0.0
 
-def check_sheet(doc):
+def check_sheet_owner(doc):
     rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
     today = get_today()
     today_day = today.day
@@ -188,7 +194,8 @@ def check_sheet(doc):
             "rent_start": start_str,
             "rent_end": move,
             "lease_remain": remain_str,
-            "status": status
+            "status": status,
+            "f_due_day": str(row[COL_DUE_DAY]).strip() if len(row) > COL_DUE_DAY else ""
         }
 
         if status == "付":
@@ -204,6 +211,80 @@ def check_sheet(doc):
             today_due.append(info)
 
     return today_due
+
+def check_sheet_friend_c(doc):
+    rows = get_sheet_data(doc["book_id"], doc["sheet_id"], doc["range"])
+    today = get_today()
+    today_month = today.month
+    today_day = today.day
+    title_rows = set(doc["title_rows"])
+    today_due = []
+
+    for i, row in enumerate(rows):
+        rn = i + 1
+        if rn in title_rows: continue
+        if len(row) < 12: continue
+        room = str(row[COL_ROOM]).strip() if len(row) > COL_ROOM else ""
+        if not room: continue
+        if not any(c.isdigit() for c in room): continue
+
+        f_val = str(row[COL_DUE_DAY]).strip() if len(row) > COL_DUE_DAY else ""
+
+        if not f_val:
+            continue
+
+        if "✔" in f_val:
+            continue
+
+        nums = re.findall(r'\d+', f_val)
+        if not nums:
+            continue
+
+        if len(nums) >= 2:
+            due_month = int(nums[0])
+            due_day = int(nums[-1])
+        else:
+            due_month = today_month
+            due_day = int(nums[0])
+
+        if due_month != today_month or due_day != today_day:
+            continue
+
+        rent_str = str(row[COL_RENT]).strip() if len(row) > COL_RENT else "0"
+        water_str = str(row[COL_WATER]).strip() if len(row) > COL_WATER else "0"
+        net_str = str(row[COL_NET]).strip() if len(row) > COL_NET else "0"
+        payment_str = str(row[COL_PAYMENT]).strip() if len(row) > COL_PAYMENT else "月付"
+        start_str = str(row[COL_START]).strip() if len(row) > COL_START else ""
+        end_str = str(row[COL_END]).strip() if len(row) > COL_END else ""
+        remain_str = str(row[COL_REMAIN]).strip() if len(row) > COL_REMAIN else ""
+
+        rent_val = safe_float(rent_str)
+        water_val = safe_float(water_str)
+        net_val = safe_float(net_str)
+        total_payment = rent_val + water_val + net_val
+
+        info = {
+            "room": room,
+            "rent": rent_str,
+            "water": water_str,
+            "net": net_str,
+            "total": f"{total_payment:.0f}" if total_payment == int(total_payment) else f"{total_payment:.2f}",
+            "payment": payment_str or "月付",
+            "rent_start": start_str,
+            "rent_end": end_str,
+            "lease_remain": remain_str,
+            "status": "",
+            "f_due_day": f_val
+        }
+        today_due.append(info)
+
+    return today_due
+
+def check_sheet(doc):
+    if doc.get("use_f_column"):
+        return check_sheet_friend_c(doc)
+    else:
+        return check_sheet_owner(doc)
 
 def check_token_expiry():
     try:
@@ -326,16 +407,7 @@ def main():
             today_str = datetime.now(TZ).strftime("%Y-%m-%d")
             rand = random.randint(10000, 99999)
             if cards:
-                owe_count = sum(1 for doc in DOCS if t in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "欠")
-                quit_count = sum(1 for doc in DOCS if t in doc["push_to"] for r in all_data.get(doc["name"], []) if r.get("status") == "退")
-                normal_count = total_due - owe_count - quit_count
-
-                title_parts = []
-                if owe_count: title_parts.append(f"欠租{owe_count}间")
-                if quit_count: title_parts.append(f"退租{quit_count}间")
-                if normal_count: title_parts.append(f"交租{normal_count}间")
-                title = f"🏠 收租提醒 | {'·'.join(title_parts)} | {total_due}间待处理 · {now}"
-
+                title = f"🏠 收租提醒 | 交租{total_due}间 | {total_due}间待处理 · {now}"
                 html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 收租/退租提醒 · {today_str}</h2>'
                 html += "".join(cards)
                 html += f'<div style="background:#FAFAFA;border-radius:4px;padding:6px 12px;text-align:center;font-size:12px;color:#555;margin-top:10px">共 {total_due} 间待处理</div>'
@@ -344,7 +416,7 @@ def main():
                 print(f"已推送 {t}: {title}")
             else:
                 title = f"🏠 收租提醒 | 今日无待处理 · {now}"
-                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期/退租。</p><!-- {rand} -->'
+                html = f'<h2 style="font-size:17px;color:#222;margin:0 0 10px">📢 今日无待处理 · {today_str}</h2><p>所有房间已付清或无到期。</p><!-- {rand} -->'
                 send_pushplus(token, title, html)
                 print(f"已推送 {t}: 今日无待处理")
 
