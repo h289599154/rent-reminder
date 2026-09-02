@@ -1,7 +1,7 @@
 name: Rent Reminder Daily
 on:
   schedule:
-    - cron: '16 1 * * *'
+    - cron: '16 5 * * *'
   workflow_dispatch:
     inputs:
       target:
